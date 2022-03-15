@@ -1,0 +1,696 @@
+---
+title: "Bayesain Computation with R"
+output:
+  html_notebook:
+    toc: yes
+---
+
+\
+\
+
+#### This notebook was made with 'Bayesain Computation with R' by Jim Albert as reference. This notebooks is for personal use only.
+
+\
+\
+\
+
+# Ch.2 Introduction to Bayesian Thinking
+
+\
+\
+
+#### In this chapter, the basic element of the Bayesain inferential approach are introduced through the basic problem of learning about a population proportion.
+
+\
+
+#### Before taking data, one has **_beliefs_** about the value of the proportion and one models his or her beliefs in terms of a **_prior distribution_**. We will illustrate the use of different functional forms for this prior. After data have been observed, one **_updates one's beliefs_** about the proportion by computing the **_posterior distribution_**. Allso, one may be interested in predicting the likely outcomes of a new sample taken from the population.
+
+\
+\
+\
+\
+
+## Learning about the proportion of heavy sleepers
+
+\
+
+#### Suppose a person is interested in learning about the sleeping habits of American college students. she hears that doctors recommend eight hours of sleep for an average adult. What proportion of college students get at least eight hours of sleep?
+
+\
+
+#### Here we think of a population consisting of all American college students and let **_p_** represent the proportion of this population who sleep (on a typical night during the week) at least eight hours. We are interested in learning about the **_location_** of _p_.
+
+\
+
+#### The value of the proportion _p_ is unknown. In the Bayesian viewpoint, a person's belief about the uncertainty in this proportion are represented by a probability distribution placed on this parameter. This distribution reflects the person's subjective prior opinion about plausible values of _p_.
+
+\
+
+#### A random sample of students from a particular university will be taken to learn about this proportion. But first the researcher does some initial research to learn about the sleeping habits of college students. This research will help her in constructing a **_prior distribution_**.
+
+\
+
+#### After some initial research, she believes that college students generally get less than eight hours of lseep and so _p_ is likely smaller than _0.5_. After some reflection, her best guess at the value of _p_ is _0.3_. But it is very plausible that this proportion could be any value in the interval from _0_ to _0.5_.
+
+\
+
+#### A sample of 27 students is taken -- in this group, 11 record that they had at least eight hours of sleep the previous night. Based on the prior information and these observed data, the researcher is intersted in estimating the proportion of _p_. In addition, she is interested in predicting the number of students that get at least eight hours of sleep if a new sample of 20 students is taken.
+
+\
+
+#### Suppose that our **_prior density for p_** is denoted by **_g(p)_**. If we regard a "success" as sleeping at least eight hours and we take a random sample with _s_ successes and _f_ failures, then **_the likelihood function, L(p)_**, is given by
+
+\
+
+$$L(p) \propto p^{s}(1-p)^{f}, \enspace  0 < p < 1.$$
+
+\
+
+#### (Recall that the likelihood function for a binomial density is given by a _beta(s+1, f+1)_. Also, note that, _L(p) = g(data|p)_).
+
+\
+
+#### The **_posterior density for p, g(p|data)_**, by Bayes' rule is obtained up to a proportionality constant by multiplying the prior density by the likelihood:
+
+\
+
+$$g(p|data) \propto g(p)L(p).$$
+
+\
+
+#### We demonstrate the posterior distribution calculations using three different choices of the prior density _g_ corresponding to three models for representing the researcher's prior knowledge about the proportion.
+
+\
+\
+\
+\
+
+## Using a _Discrete_ prior
+
+\
+
+#### A simple approach for assessing a prior for _p_ is to write down a list of plausible proportion values and then assign weights to these values. The person in our example believes that
+
+\
+
+$$0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85, 0.95$$
+
+\
+
+#### are possible values for _p_. Based on her beliefs, she assigns these values the corresponding **_weights_**
+
+\
+
+$$1, 5.2, 8, 7.2, 4.6, 2.1, 0.7, 0.1, 0, 0$$
+
+\
+
+#### which can be **_converted to prior probabilities_** by dividing each weight by the sum.
+
+\
+\
+
+#### In R, we define _p_ to be the vector of proportion values and **_prior_** the corresponding weights that we normalize to probabilities. (Recall that, a probability distribution function is said to be “normalized” if the sum of all its possible results is equal to one).
+
+```{r}
+p <- seq(0.05, 0.95, by=0.1)
+prior <- c(1, 5.2, 8, 7.2, 4.6, 2.1, 0.7, 0.1, 0, 0)
+prior <- prior/sum(prior)  # normalizing
+plot(p, prior, type="h", ylab="Prior Probability", main="A discrete prior distribution for a proportion p")
+```
+
+\
+
+#### In our example, 11 of 27 students sleep a sufficient number of hours, so _s_ = 11 and _f_ = 16, and the likelihood function is
+
+\
+
+$$L(p) \propto p^{11}(1-p)^{16}, \enspace  0 < p < 1.$$
+
+\
+
+#### (Note that the likelihood is a beta density with parameters _s_ + 1 = 12 (_alpha_) and _f_ + 1 = 17 (_beta_)).
+
+\
+\
+
+#### The R function pdisc() in the package _LearnBayes_ computes the posterior probabilities. To use pdisc(), one inputs the vector of proportion values _p_, the vector of prior probabilities _prior_, and a data vector _data_ consisting of _s_ and _f_. The output of a pdisc() is a vector of posterior probabilities.
+
+```{r}
+library(LearnBayes)  # for pdisc()
+data <- c(11, 16)  # s=11, f=16
+post <- pdisc(p, prior, data)
+round(cbind(p, prior, post), 2)  # To display a table
+```
+
+\
+\
+
+#### The xyplot() function in the _lattice_ package is used to construct comparative line graphs of the prior and posterior distributions.
+
+```{r}
+library(lattice)
+PRIOR <- data.frame("prior", p, prior)
+POST <- data.frame("posterior", p, post)
+names(PRIOR) <- c("Type", "P", "Probability")
+names(POST) <- c("Type", "P", "Probability")
+data <- rbind(PRIOR, POST)
+xyplot(Probability~P|Type, data=data, layout=c(1,2), type="h", lwd=3, col="black", main="Posterior and Prior distribution for a proportion p using a discrete prior")
+```
+
+#### Here we note that most of the posterior probability is concentrated on the values _p_ = 0.35 and _p_ = 0.45. If we combine the probabilities for the three most likely values, we can say the posterior probability that _p_ falls in the set {0.25, 0.35, 0.45} is equal to 0.940.
+
+\
+\
+\
+\
+
+## Using a _Beta_ prior
+
+\
+
+#### Since the proportion is a continuous parameter, an alternative approach is to construct a density _g(p)_ on the interval (0, 1) that represents the person's initial beliefs. 
+
+\
+
+#### Suppose she believes that the proportion is equally likely to be smaller or larger than _p_ = 0.3. Morover, she is 90% confident that _p_ is less than 0.5. A convenient family of densities for a proportion is the beta with kernel proportional to
+
+\
+
+$$g(p) \propto p^{a-1}(p-1)^{b-1}, \enspace  0 < p < 1.$$
+
+\
+
+#### where the **_hyperparameters_** _a_ and _b_ are chosen to reflect the user's prior beliefs about _p_. The mean of a beta prior, _m_, is
+
+\
+
+$$m = a/(a+b)$$
+
+\
+
+#### and the variance of the prior, _v_, is
+
+\
+
+$$v = m(1-m)/(a+b+1)$$
+
+\
+
+#### but it is **_difficult_** in practice for a user to assess values of _m_ and _v_ **_to obtain values of the beta parameters_** _a_ and _b_. It is **_easier_** to obtain _a_ and _b_ **_indirectly through statements about the percentiles of the distribution_**.
+
+\
+\
+
+#### Here the person believes that the median and 90th percentiles of the proportion are given, respectively, by 0.3 and 0.5. 
+
+\
+
+#### The function beta.select() in the _LearnBayes_ package is useful for finding the shape parameters of the beta density that match this prior knowledge. The inputs to beta.select() are two lists, _quantile1_ and _quantile2_, that defines these two prior percentiles, and the function returns the values of the matching beta parameters.
+
+```{r}
+quantile1 <- list(p=0.5, x=0.3)  # the median
+quantile2 <- list(p=0.9, x=0.5)  # the 90th percentile
+beta.select(quantile1, quantile2)
+```
+
+#### We see that this prior information is matched with a beta density with _a_ = 3.26 and _b_ = 7.19.
+
+\
+
+#### Combining this beta prior with the likelihood function, one can show that the posterior density is also of the beta form with updated parameters _a_ + _s_ and _b_ + _f_.
+
+\
+
+$$g(p) \propto p^{a+s-1}(1-p)^{b+f-1}, \enspace  0 < p < 1.$$
+
+\
+
+#### where _a_ + _s_ = 3.26 + 11 and _b_ + _f_ = 7.19 + 16 (this is an example of **_conjugate analysis_**, where the prior and posterior densities have the same functional form; this means that we expect the posterior distribution to be the same distribution as prior with different parameters).
+
+\
+\
+
+#### Since the prior, likelihood, and posterior are all in the beta family, we can use the R command dbeta() to compute the values of prior, likelihood, and posterior.
+
+```{r}
+# parameters for the prior
+a <- 3.26  
+b <- 7.19
+# parameters for the likelihood
+s <- 11  
+f <- 16
+curve(dbeta(x,a+s,b+f), from=0, to=1, xlab="p", ylab="Density", lty=1, col=1, lwd=2)  # The posterior
+curve(dbeta(x,s+1,f+1), add=T, lty=2, col=2, lwd=2)  # The likelihood
+curve(dbeta(x,a,b), add=T, lty=3, col=3, lwd=2)  # The prior
+legend(0.7, 4, c("Prior", "Likelihood", "Posterior"), lty=c(3,2,1), col=c(3,2,1), lwd=c(2,2,2))
+```
+
+#### We can see the three densities displayed using three applications of the curve() function. This figure helps show that the **_posterior density_** in this case **_compromises_** between the initial prior beliefs and the information in the data.
+
+\
+\
+
+#### We illustrate different ways of **_summarizing the beta posterior distribution to make inferences_** about the proportion of heavy sleepers _p_. The beta cdf function, pbeta(), and inverse cdf function, qbeta(), are useful in computing probabilities and constructing interval estimates for _p_. (Recall that cdf is _F(x) = P(X ≤ x)_)
+
+\
+
+#### Is it likely that the proportion of heavy sleepers is greater than 0.5? This is answered by computing the **_posterior probability_**
+
+\
+
+$$P(p >= 0.5|data)$$
+
+\
+
+#### which is given by pbeta() function:
+
+
+```{r}
+1-pbeta(0.5, a+s, b+f)
+```
+
+#### This probability is small, so it is unlikely that more than half of the students are heavy sleepers.
+
+\
+\
+
+#### A 90% interval estimate for _p_ is found by computing the 5th and 95th percentiles of the beta density using qbeta() function:
+
+```{r}
+round(qbeta(c(0.05, 0.95), a+s, b+f),3)
+```
+
+#### This is the 90% **_posterior credible interval_** for the proportion _p_.
+
+\
+
+#### These summaries are exact because they are based on R functions for the beta posterior density. An alternative method of summarization of posterior distribution is based on **_simulation_**. 
+
+\
+\
+
+#### In this case, we can simulate a large number of values from the beta posterior density and summarize the simulated output. Using the random beta command rbeta(), we simulate 1000 random proportion values from the _beta(a+s, b+f)_ posterior and display the posterior as a histogram of the simulated values.
+
+```{r}
+ps <- rbeta(1000, a+s, b+f)  # simulated sample
+hist(ps, xlab="p", main="A simulated sample from the beta posterior distribution of p")
+```
+
+\
+
+#### The probability that the proportion is larger than 0.5 is estimated using the proportion of simulated values in this range.
+
+```{r}
+sum(ps >= 0.5)/1000  # dividing it by the total number of samples to obtain the probability
+```
+
+\
+\
+
+#### A 90% interval estimate can be estimated by the 5th and 95th sample quantiles of the simulated sample.
+
+```{r}
+quantile(ps, c(0.05, 0.95))
+```
+
+\
+\
+
+#### Note that these summaries of the posterior density for _p_ **_based on simulation are approximately equal to the exact values_** based on calculations from the beta distribution.
+
+\
+\
+\
+\
+
+## Using a histogram prior
+
+\
+
+#### Although there are computational advantages to using a beta prior, it is straightforward to perform posterior computations for any choice of prior.
+
+\
+
+#### We outline a "brute-force" method of summarizing posterior computations for an arbitrary prior density _g(p)_:
+
+\
+
+#### • Choose a grid of values of _p_ over an interval that covers the posterior density.
+#### • Compute the product of the likelihood _L(p)_ and the prior _g(p)_ on the grid.
+#### • Normalize by dividing each product by the sum of the products. In this step, we are approximating the posterior density by a discrete probability distribution on the grid.
+#### • Using the R command sample(), take a random sample with replacement from the discrete distribution.
+
+\
+
+#### The resulting simulated draws are an approximate sample from the posterior distribution.
+
+\
+\
+
+#### We illustrate this "brute-force" algorithm for a "histogram" prior that may better reflect the person's prior opinion about the proportion _p_. Suppose it is convenient for our person to state her prior beliefs about the proportion of heavy sleepers by dividing the range of _p_ into ten subintervals,
+
+\
+
+$$(0,\,0.1), (0.1,\,0.2), \, ... \,, (0.9,\,1)$$
+
+\
+
+#### and then assigning probabilities to the intervals. The person in our example assigns the weights
+
+\
+
+$$1, 5.2, 8, 7.2, 4.6, 2.1, 0.7, 0.1, 0, 0$$
+
+\
+
+#### to these intervals -- this can be viewed as a continuous version of the discrete prior earlier.
+
+\
+\
+
+#### In R, we represent this histogram prior with the vector _midpt_, which contains the **_midpoints of the intervals_**, and the vector _prior_, which contains the **_associated prior weights_**. We **_convert the prior weights to probabilities_** by dividing each weight by the sum. We graph this prior using curve() and histprior() in the _LearnBayes_ package.
+
+```{r}
+midpt <- seq(0.05, 0.95, by=0.1)  # the midpoints of the intervals
+prior <- c(1, 5.2, 8, 7.2, 4.6, 2.1, 0.7, 0.1, 0, 0)  # the prior weights
+prior <- prior/sum(prior)  # normalizing to obtain the probabilities
+curve(histprior(x, midpt, prior), from=0, to=1, ylab="Prior density", ylim=c(0,0.3), main="A histogram prior for a proportion p")
+```
+
+\
+
+#### We compute the posterior density by multiplying the histogram prior by the likelihood function. (Recall that the likelihood function for a binomial density is given by a _beta(s+1, f+1)_); this function is available using dbeta() function).
+
+```{r}
+curve(histprior(x, midpt, prior)*dbeta(x, s+1, f+1),  # computing the product to obtain the posterior
+      from=0, to=1, ylab="Posterior density", main="The posterior density for a proportion using a histogram prior")
+```
+
+\
+
+#### To obtain a simulated sample from the posterior density by our algorithm, we first construct an equally spaced grid of values of the proportion _p_ and compute the product of the prior and likelihood on this grid. Then we convert the products on the grid to probabilities.
+
+```{r}
+p <- seq(0, 1, length=500)  # equally spaced grid of values of the proportion
+post <- histprior(p, midpt, prior)*dbeta(p, s+1, f+1)  # computing the product to obtain the posterior
+post <- post/sum(post)  # normalizing the grid to obtain the probabilities
+```
+
+\
+\
+
+#### Last, we take a sample with replacement from the grid using the sample() function.
+
+```{r}
+ps <- sample(p, replace=T, prob=post)
+```
+
+\
+\
+
+#### We can then plot a histogram of the simulated values.
+
+```{r}
+hist(ps, xlab="p", main="Histogram of the simulated values drawn from the posterior distribution")
+```
+
+\
+
+#### The simulated draws can be used as before to summarize any feature of the posterior distribution of interest.
+
+\
+\
+\
+\
+
+## Prediction
+
+\
+
+#### We have focused on learning about the population proportion of heavy sleepers $p$. Suppose our person is also interested in predicting the number of heavy sleepers $\tilde{y}$ in a future sample of $m = 20$ students. If the **_current beliefs_** about $p$ are contained in the density $g(p)$, then the **_predictive density_** of $\tilde{y}$ is given by
+
+\
+
+#### $$f(\tilde{y}) = \int f(\tilde{y}|p)g(p)dp.$$
+
+\
+
+#### If **$g$** is a prior density, then we refer to this as the **_prior_** **predictive density**, and if $g$ is a posterior, then $f$ is a **_posterior_** **predictive density**.
+
+\
+
+#### We illustrate the computation of the predictive density using the different forms of prior density described in this chapter. 
+
+\
+\
+\
+
+### Discrete prior
+
+\
+
+#### Suppose we use a **_discrete_** prior where $\left \{ p_{i} \right \}$ represent the possible values of the proportion with respective probabilities $\left \{ g(p_{i}) \right \}$. Let $f_{B}(y|n,p)$ denote the **_binomial sampling density_** given values of the sample size $n$ and proportion $p$:
+
+\
+
+#### $$f_{B}(y|n,p) = \binom{n}{y} p^{y} (1-p)^{n-y}, \enspace y =  0, \cdots, n.$$
+
+\
+
+#### Then the predictive probability of $\tilde{y}$ successes in a future sample of size $m$ is given by
+
+\
+
+#### $$f(\tilde{y}) = \sum f_{B}(\tilde{y}|m,p_{i})g(p_{i}).$$
+
+\
+
+#### The function pdiscp() in the _LearnBayes_ package can be used to compute the predictive probabilities when $p$ is given a discrete distribution. The output is a vector of the corresponding predictive probabilities.
+
+```{r}
+library(LearnBayes)  # for pdiscp()
+p <- seq(0.05, 0.95, by=0.1)  # a vector of proportion values
+prior <- c(1, 5.2, 8, 7.2, 4.6, 2.1, 0.7, 0.1, 0, 0)  # a vector of current weights
+prior <- prior/sum(prior)  # normalizing to obtain probabilities
+m <- 20  # future sample size
+ys <- 0:20  # a vector of numbers of successes of interest
+pred <- pdiscp(p, prior, m, ys)
+round(cbind(0:20,pred), 3)
+```
+
+#### We see from the output that the most likely number of successes in this future sample are $\tilde{y} = 5$ and $\tilde{y} = 6$.
+
+\
+\
+\
+
+### Beta prior
+
+#### Suppose instead that we model our beliefs about $p$ using a $beta(a,b)$ prior. In this case, we can analytically integrate out $p$ to get a closed-form expression for the predictive density,
+
+\
+
+$$
+\begin{aligned}
+f(y) &= \int f_{B}(\tilde{y}|m,p)g(p)dp \\ 
+&= \binom{m}{\tilde{y}}\frac{B(a + \tilde{y}, b + m - \tilde{y})}{B(a,b)}, \enspace \tilde{y} = 0, \cdots, m,
+\end{aligned}
+$$
+
+\
+
+#### Where $B(a,b)$ is the beta function. 
+
+\
+\
+
+#### The predictive probabilities using the beta density are computed using the function pbetap(). The output is a vector of predictive probabilities corresponding to the values in $\tilde{y}$. 
+
+\
+
+#### We illustrate this computation using the $beta(3.26, 7.19)$ prior used to reflect the person's beliefs about the proportion of heavy sleepers at the school.
+
+```{r}
+ab <- c(3.26, 7.19)  # vector of beta parameters a and b
+m <- 20  # future sample size
+ys <- 0:20  # vector of numbers of successess \tilde{y}
+pred <- pbetap(ab, m, ys)
+pred
+```
+
+\
+\
+\
+
+### Any prior
+
+\
+
+#### We have illustrated the computation of the predictive density for two choices of prior densities. One convenient way of computing a predictive density for _any_ prior is by simulation. To obtain $\tilde{y}$, we first simulate, say, $p^{*}$ from $g(p)$, and then simulate $\tilde{y}$ from the binomial distribution $f_{B}(\tilde{y}|p^{*})$.
+
+\
+
+#### We demonstrate this simulation approach for the $beta(3.26,7.19)$ prior. We first simulate 1000 draws from the prior and store the simulated values in _p_:
+
+```{r}
+p <- rbeta(1000, 3.26, 7.19)
+```
+
+\
+\
+
+#### Then we simulate values of $\tilde{y}$ for these random _p_s using the rbinom() function.
+
+```{r}
+y_tilde <- rbinom(1000, 20, p)
+```
+
+\
+\
+
+#### To summarize the simulated draws of $\tilde{y}$, we first use the table() function to tabulate the distinct values; we count the frequencies of each $\tilde{y}$ value.
+
+```{r}
+table(y_tilde)
+```
+
+#### The reason why there is no 18, 19, 20 is because their frequencies are 0.
+
+```{r}
+sum(y_tilde == 18); sum(y_tilde == 19); sum(y_tilde == 20)
+```
+
+
+\
+\
+
+#### We save the frequencies of $\tilde{y}$ in a vector _freq_. Then we convert the frequencies to probabilities by dividing each frequency by the sum and use the plot() command to graph the predictive distribution.
+
+```{r}
+freq <- table(y_tilde)  # saving the frequencies of y_tilde
+y_tildes <- as.integer(names(freq))  # a vector of each number of y_tildes
+predprob <- freq/sum(freq)  # normalizing the frequencies to obtain probabilities
+plot(y_tildes, predprob, type="h", xlab="y_tilde", ylab="Predictive probability", main="A graph of the predictive probabilities of y_tilde")
+```
+
+\
+\
+
+#### Suppose we wish to summarize this discrete predictive distribution by an interval that covers at least 90% of the probability. The R function discint() in the _LearnBayes_ package is useful for this purpose. In the output, the vector _y_tildes_ contains the values of $\tilde{y}$ and _predprob_ contains the associated probabilities found from the table output. The matrix _dist_ contains the probability with the columns _y_tildes_ and _predprob_. 
+
+```{r}
+dist <- cbind(y_tildes, predprob)
+dist
+```
+
+\
+\
+
+#### The function discint() has two inputs: the matrix _dist_ and a given coverage probability _covprob_. The output is a list where the component _set_ gives the credible set and _prob_ gives the exact coverage probability.
+
+```{r}
+covprob <- 0.9  # since we wish to get an interval that covers at least 90% of the probability
+discint(dist, covprob)
+```
+
+#### We see that the probability that $\tilde{y}$ falls in the interval {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11} is 90.9%. To say it in a different way, let $\tilde{y}/20$ denote the proportion of sleepers in the future sample. The probability that this sample proportion falls in the interval [1/20, 11/20] is 90.9%. As expected, this interval is much wider than a 90.9% probability interval for the population proportion $p$. In predicting a future sample proportion, there are two sources of uncertainty -- the uncertainty in the value of $p$ and the binomial uncertainty in the value of $\tilde{y}$, and the predictive interval is relatively long since it incorporates both types of uncertainty.
+
+\
+\
+\
+\
+\
+\
+\
+
+## Summary of R Functions
+
+\
+
+**beta.select()** – finds the shape parameters of a beta density that matches knowledge of two quantiles of the distribution
+
+_Usage_: beta.select(quantile1,quantile2)
+
+_Arguments_: quantile1, list with components p, the value of the first probability, and x, the value of the first quantile; quantile2, list with components p, the value of the second probability, and x, the value of the second quantile
+
+_Value_: vector of shape parameters of the matching beta distribution
+
+\
+
+**discint()** – computes a highest probability interval for a discrete distribution 
+
+_Usage_: discint(dist,prob)
+
+_Arguments_: dist, a probability distribution written as a matrix, where the first column contains the values and the second column contains the probabilities; prob, the probability content of interest
+
+_Value_: prob, the exact probability content of the interval, and set, the set of values of the probability interval
+
+\
+
+**histprior()** – computes the density of a probability distribution defined on a set of equal-width intervals
+
+_Usage_: histprior(p,midpts,prob)  
+
+_Arguments_: p, the vector of values for which the density is to be computed; midpts, the vector of midpoints of the intervals; prob, the vector of probabilities of the intervals  
+
+_Value_: vector of values of the probability density  
+
+\
+
+**pbetap()** – computes the predictive distribution for the number of successes of a future binomial experiment with a beta distribution for the proportion
+
+_Usage_: pbetap(ab, n, s)
+
+_Arguments_: ab, the vector of parameters of the beta prior; n, the size of the future binomial sample; s, the vector of the numbers of successes for a future binomial experiment
+
+_Value_: the vector of predictive probabilities for the values in the vector s
+
+\
+
+**pdisc()** – computes the posterior distribution for a proportion for a discrete prior distribution
+
+_Usage_: pdisc(p, prior, data)
+
+_Arguments_: p, a vector of proportion values; prior, a vector of prior probabilities; data, a vector consisting of the number of successes and number of failures
+
+_Value_: the vector of posterior probabilities
+
+\
+
+**pdiscp()** – computes the predictive distribution for the number of successes of a future binomial experiment with a discrete distribution for the proportion 
+
+_Usage_: pdiscp(p, probs, n, s)
+
+_Arguments_: p, the vector of proportion values; probs, the vector of probabilities; n, the size of the future binomial sample; s, the vector of the numbers of successes for a future binomial experiment
+
+_Value_: the vector of predictive probabilities for the values in the vector s
+
+\
+\
+\
+\
+\
+\
+\
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
