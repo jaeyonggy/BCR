@@ -1,0 +1,770 @@
+---
+title: "Bayesian Computation with R"
+output:
+  html_notebook:
+    toc: yes
+---
+
+<style type="text/css">
+
+body, td {
+   font-size: 17px;  # body, td, is for normal text
+}
+code.r{
+  font-size: 12px;  # code.r is for r code
+}
+pre {
+  font-size: 10px  # pre is for output of knitr chunks
+}
+</style>
+
+\
+\
+
+This notebook was made with 'Bayesian Computation with R' by Jim Albert as reference. This notebook is for personal use only.
+
+\
+\
+\
+
+# Ch.3 Single-parameter models
+
+\
+
+In this chapter, we introduce the use of R in summarizing the posterior distributions for several single-parameter models. We begin by describing Bayesian inference for a variance for a normal population and inference for a Poisson mean when informative prior information is available. For both problems, summarization of the posterior distribution is facilitated by the use of R functions to compute and simulate distributions from the exponential family. In Bayesian analyses, one may have limited beliefs about a parameter and there may be several priors that provide suitable matches to these beliefs. In estimating a normal mean, we illustrate the use of two distinct priors in modeling beliefs and show that inferences may or may not be sensitive to the choice of prior. In this example, we illustrate the “brute-force” method of summarizing a posterior where the density is computed by the “prior times likelihood” recipe over a fine grid. One way to generalize the family of conjugate priors is by the use of mixtures, and we illustrate the use of a mixture of beta distributions to model the belief that a coin is biased. We conclude by describing a Bayesian test of the simple hypothesis that a coin is fair. The computation of the posterior probability of “fair coin” is facilitated using beta() and binom() functions in R.
+
+\
+\
+\
+
+## Normal Distribution with _known_ mean but _unknown_ variance.
+
+\
+
+Consider a problem of estimating an unknown variance using American football scores. The focus is on the **_difference between a game outcome and a published point spread_**: $d$ (where, _game outcome_: winning score minus losing score; _point spread_: a forecast of the number of points by which a stronger team is expected to defeat a weaker one, used for betting purposes). We observe $d_{1}, \cdots, d_{n}$, the observed differences between game outcomes and point spreads for $n$ football games. If these differences are assumed to be a random sample from a normal distribution with mean 0 and unknown variance $\sigma^{2}$, the likelihood function is given by
+
+\
+
+$$L(\sigma^{2}) \propto (\sigma^{2})^{-\frac{n}{2}}exp\left \{ -\sum_{i=1}^{n}d_{i}^{2}/(2\sigma^{2}) \right \} \, , \quad \sigma^{2} > 0.$$
+
+\
+
+Suppose the noninformative prior density $p(\sigma^{2}) \propto 1/\sigma^{2}$ is assigned to the variance. This is the **_standard vague prior placed on a variance_** -- it is equivalent to assuming that _the logarithm of the variance is uniformly distributed on the real line_. Then the posterior density of $\sigma^{2}$ is given, up to a proportionality constant, by
+
+\
+
+$$g(\sigma^{2}|\mathrm{data}) \propto (\sigma^{2})^{-\frac{n}{2}-1}exp \left \{-v/(2\sigma^{2}) \right \} \, ,$$
+
+\
+
+where $v = \sum_{i=1}^{n}d_{i}^{2}$.
+
+\
+
+If we define the **_precision_** (the inverse of the variance) parameter $P = 1/\sigma^{2}$, then it can be shown that $P$ is distributed as $U/v$, where $U$ has a chi-squared distribution with $n$ degrees of freedom. 
+
+\
+\
+
+Suppose we are interested in a point estimate and a 95% probability interval for the standard deviation $\sigma$.
+
+\
+
+In the datafile _footballscores_ from the _LearnBayes_ package, it contains for each 672 games, 'favorite' and 'underdog', which are the actual scores of the favorite and underdog teams, and 'spread', which is the published point spread.
+
+
+```{r}
+library(LearnBayes)  # for footballscores dataset
+data(footballscores)
+fbs <- footballscores
+fbs
+```
+
+\
+\
+
+We compute the differences between the game outcome and the point spread, get the sample size and compute the sum of squares of the differences.
+
+```{r}
+d <- fbs$favorite - fbs$underdog - fbs$spread  # the differences
+n <- length(d)  # sample size
+v <- sum(d^2)  # sum of squares of the differences
+```
+
+\
+\
+
+We simulate 1000 values from the posterior distribution of the standard deviation $\sigma$ in two steps. First, we simulate values of the precision parameter $P = 1/\sigma^{2}$ from the scaled _chi-square($n$)_ distribution. Then we perform the transformation $\sigma = \sqrt{1/P}$ to get values from the posterior distribution of the standard deviation $\sigma$. We use the hist() command to construct a histogram of the draws of $\sigma$.
+
+```{r}
+library(ggplot2)
+P <- rchisq(1000, n)/v  # simulate values of the precision parameter
+s <- sqrt(1/P)  # transformation to get values from the post. dstn
+hist(s, main="Simulated sample of the standard deviation of the differences")  # histogram of the draws
+```
+
+\
+
+The R quantile() command is used to extract the 2.5%, 50%, and 97.5% percentiles of this simulated sample.
+
+```{r}
+quantile(s, probs=c(0.025, 0.5, 0.975))
+```
+
+A point estimate for $\sigma$ is provided by the posterior median 13.86. In addition, the extreme percentiles (13.14, 14.62) represent a 95% probability interval for $\sigma$.
+
+\
+\
+\
+\
+\
+\
+\
+
+## Estimating a heart transplant mortality rate
+
+\
+
+Consider the problem of learning about the rate of success of heart transplant surgery of a particular hospital in the United States. For this hospital, we observe the number of transplant surgeries $n$, and the number of deaths within 30 days of surgery $y$ is recorded. In addition, one can predict the probability of death for an individual patient. This prediction is based on a model that uses information such as patients’ medical condition before surgery, gender, and race. Based on these predicted probabilities, one can obtain an expected number of deaths, denoted by $e$. A standard model assumes that the number of deaths $y$ follows a Poisson distribution with mean $e\lambda$, and **_the objective is to estimate the mortality rate per unit exposure $\lambda$_**.
+
+\
+
+The standard estimate of $\lambda$ is the maximum likelihood estimate $\hat{\lambda} = y/e$. Unfortunately, this estimate can be poor when the number of deaths $y$ is close to zero. In this situation when small death counts are possible, it is desirable to use a Bayesian estimate that uses prior knowledge about the size of the mortality rate. A convenient choice for a prior distribution is a member of the $gamma(\alpha,\beta)$ density of the form
+
+\
+
+$$p(\lambda) \propto \lambda^{\alpha-1}exp(-\beta\lambda) \, , \quad \lambda > 0$$
+
+\
+
+A convenient source of prior information is heart transplant data from a small group of hospitals that we believe has the same rate of mortality as the rate from the hospital of interest. Suppose we observe the number of deaths $z_{j}$ and the exposure $o_{j}$ for ten hospitals ($j = 1, \cdots, 10$), where $z_{j}$ is Poisson with mean $o_{j}\lambda$. If we assign $\lambda$ the standard noninformative prior $p(\lambda) \propto \lambda^{-1}$, then the updated distribution for $\lambda$, given these data from the ten hospitals, is
+
+\
+
+$$p(\lambda) \propto \lambda^{\sum_{j=1}^{10}z_{j}-1}exp\left ( -(\sum_{j=1}^{10}o_{j})\lambda \right ) \, .$$
+
+\
+
+Using this information, we have a $gamma(\alpha, \beta)$ prior for $\lambda$, where $\alpha = \sum_{j=1}^{10}z_{j}$ and $\beta = \sum_{j=1}^{10}o_{j}$. In this example, we have
+
+\
+
+$$\sum_{j=1}^{10}z_{j} = 16, \ \sum_{j=1}^{10}o_{j} = 15174$$
+
+\
+
+and so we assign $\lambda$ a $gamma(16, 15174)$ prior.
+
+\
+
+If the number of deaths from surgery $y_{\mathrm{obs}}$ for a given hospital with exposure $e$ is $Poisson(e\lambda)$ and $\lambda$ is assigned the $gamma(\alpha, \beta)$ prior, then the posterior distribution will also have the gamma form with parameters $\alpha + y_{\mathrm{obs}}$ and $\beta + e$. Also the (prior) predictive density of $y$ (before any data are observed) can be computed using the formula
+
+\
+
+$$f(y) = \frac{f(y|\lambda)g(\lambda)}{g(\lambda|y)} \ ,$$
+
+\
+
+where $f(y|\lambda)$ is the $Poisson(e\lambda)$ sampling density and $g(\lambda)$ and $g(\lambda|y)$ are, respectively, the prior and posterior densities of $\lambda$.
+
+\
+
+By the model-checking strategy of Box (1980), both the posterior density $g(\lambda|y)$ and the predictive density $f(y)$ play important roles in a Bayesian analysis. **_By using the posterior density, one performs inference about the unknown parameter conditional on the Bayesian model that includes the assumptions of sampling density and the prior density. One can check the validity of the proposed model by inspecting the predictive density_**. If the observed data value $y_{\mathrm{obs}}$ is consistent with the predictive density $p(y)$, then the model seems reasonable. On the other hand, if $y_{\mathrm{obs}}$ is in the extreme tail portion of the predictive density, then this casts doubt on the validity of the Bayesian model, and perhaps the prior density or the sampling density has been misspecified.
+
+\
+\
+
+We consider inference about the heart transplant death rate for two hospitals –- one that has experienced a small number of surgeries and a second that has experienced many surgeries. First consider hospital A, which experienced only one death ($y_{\mathrm{obs}} = 1$) with an exposure of $e = 66$. The standard estimate of this hospital’s rate, 1/66, is suspect due to the small observed number of deaths.
+
+\
+
+The following R calculations illustrate the Bayesian calculations. After the gamma prior parameters _alpha_ and _beta_ and exposure _ex_ are defined, the predictive density of the values $y = 0, 1, \cdots, 10$ is found by using the preceding formula and the R functions dpois() and dgamma(). The formula for the predictive density is valid for all $\lambda$, but to ensure that there is no underflow in the calculations, the values of $f(y)$ are computed for the prior mean value $\lambda = \alpha / \beta$. Note that practically all of the probability of the predictive density is concentrated on the two values $y = 0 \ \mathrm{and} \ 1$. The observed number of deaths ($y_{\mathrm{obs}} = 1$) is in the middle of this predictive distribution, so there is no reason to doubt our Bayesian model.
+
+```{r}
+alpha <- 16
+beta <- 15174
+yobs <- 1
+ex <- 66
+y <- 0:10
+lam <- alpha/beta
+
+py <- dpois(y, lam*ex)*dgamma(lam, shape=alpha, rate=beta)/dgamma(lam, shape=alpha+y, rate=beta+ex)
+
+cbind(y, round(py, 3))
+```
+
+\
+\
+
+The posterior density of $\lambda$ of hospital A can be summarized by simulating 1000 values from the gamma density.
+
+```{r}
+lambdaA <- rgamma(1000, shape=alpha+yobs, rate=beta+ex)
+```
+
+\
+\
+
+Let’s consider the estimation of a different hospital that experiences many surgeries. Hospital B had $y_{\mathrm{obs}} = 4$ deaths, with an exposure of $e = 1767$. 
+
+\
+
+For these data, we again have R compute the prior predictive density and simulate 1000 draws from the posterior density using the rgamma() command. 
+
+```{r}
+ex <- 1767
+yobs <- 4
+y <- 0:10
+
+py <- dpois(y, lam*ex)*dgamma(lam, shape=alpha, rate=beta)/dgamma(lam, shape=alpha+y, rate=beta+ex)
+
+cbind(y, round(py, 3))
+```
+
+Again we see that the observed number of deaths seems consistent with this model since $y_{\mathrm{obs}} = 4$ is not in the extreme tails of this distribution.
+
+\
+\
+
+The posterior density of $\lambda$ of hospital B can be summarized by simulating 1000 values from the gamma density.
+
+```{r}
+lambdaB <- rgamma(1000, shape=alpha+yobs, rate=beta+ex)
+```
+
+\
+\
+
+To see the impact of the prior density on the inference, it is helpful to display the prior and posterior distributions on the same graph. 
+
+```{r, fig.width = 4, fig.height = 5}
+par(mfrow=c(2,1))
+plot(density(lambdaA), main="Hospital A", xlab="lambdaA", lwd=3)
+curve(dgamma(x, shape=alpha, rate=beta), add=T)
+legend("topright", legend=c("prior", "posterior"), lwd=c(1,3))
+plot(density(lambdaB), main="Hospital B", xlab="lambdaB", lwd=3)
+curve(dgamma(x, shape=alpha, rate=beta), add=T)
+legend("topright", legend=c("prior", "posterior"), lwd=c(1,3))
+```
+
+The density estimates of the simulated draws from the posterior distributions of the rates are shown for hospitals A and B. The gamma prior density is also displayed in each case. We see that for hospital A, **_with relatively little experience in surgeries, the prior information is significant_** and the posterior distribution resembles the prior distribution. In contrast, for hospital B, **_with many surgeries, the prior information is less influential_** and the posterior distribution resembles the likelihood function.
+
+\
+\
+\
+\
+\
+\
+\
+
+## An illustration of Bayesian robustness
+
+\
+
+In practice, one may have **_incomplete prior information_** about a parameter in the sense that **_one’s beliefs won’t entirely define a prior density_**. There may be a number of different priors that match the given prior information. For example, if you believe a priori that the median of a parameter $\theta$ is 30 and its 80th percentile is 50, certainly there are many prior probability distributions that can be chosen that match these two percentiles. **_In this situation where different priors are possible, it is desirable that inferences from the posterior not be dependent on the exact functional form of the prior_**. A Bayesian analysis is **_said to be robust to the choice of prior if the inference is insensitive to different priors_** that match the user’s beliefs.
+
+\
+\
+
+To illustrate this idea, suppose you are interested in estimating the true IQ $\theta$ for a person we’ll call Joe. You believe Joe has average intelligence, and the median of your prior distribution is 100. Also, you are 90% confident that Joe’s IQ falls between 80 and 120. 
+
+\
+
+By using the function normal.select(), we find the values of the mean and standard deviation of the normal density that match the beliefs that the median is 100 and the 95th percentile is 120.
+
+```{r}
+quantile1 <- list(p=0.5, x=100)
+quantile2 <- list(p=0.95, x=120)
+normal.select(quantile1, quantile2)
+```
+
+We see from the output that the normal density with mean $\mu = 100$ and $\tau = 12.16$ matches this prior information.
+
+\
+\
+
+Joe takes four IQ tests and his scores are $y_{1}, y_{2}, y_{3}, y_{4}$. Assuming that an individual score $y$ is distributed as $N(\theta, \sigma)$ with known standard deviation $\sigma = 15$, the observed mean score $\bar{y}$ is $N(\theta, \sigma/\sqrt{4})$.
+
+\
+
+With the use of a normal prior in this case, the posterior density of $\theta$ will also have the normal functional form. (Recall that the precision is defined as the inverse of the variance). Then the posterior precision $P_{1} = 1/\tau_{1}^{2}$ is the sum of the data precision $P_{D} = n/\sigma^{2}$ and the prior precision $P = 1/\tau^{2}$,
+
+\
+
+$$P_{1} = P_{D} + P = 4/\sigma^{2} + 1/\tau^{2} \ ,$$
+
+\
+
+The posterior standard deviation is given by
+
+\
+
+$$\tau_{1} = 1/\sqrt{P_{1}} = 1/(\sqrt{4/\sigma^{2} + 1/\tau^{2}}) \ .$$
+
+\
+
+The posterior mean of $\theta$ can be expressed as a weighted average of the sample mean and the prior mean where the weights are proportional to the precisions:
+
+\
+
+$$\mu_{1} = \frac{\bar{y}P_{D} + \mu P}{P_{D} + P} = \frac{\bar{y}(4/\sigma^{2}) + \mu(1/\tau^{2})}{4/\sigma^{2} + 1/\tau^{2}} \ .$$
+
+\
+\
+
+We illustrate the posterior calculations for three hypothetical test results for Joe. We suppose that the observed mean test score is $\bar{y} = 110$, $\bar{y} = 125$, or $\bar{y} = 140$. In each case, we compute the posterior mean(_mu1_) and posterior standard deviation(_tau1_) of Joe's true IQ $\theta$.
+
+```{r}
+mu <- 100
+tau <- 12.16
+sigma <- 15
+n <- 4
+se <- sigma/sqrt(4)
+ybar <- c(110, 125, 140)
+
+tau1 <- 1/sqrt(1/se^2 + 1/tau^2)  # posterior standard deviation
+mu1 <- (ybar/se^2 + mu/tau^2) * tau1^2
+
+summ1 <- cbind(ybar, mu1, tau1)
+summ1
+```
+
+\
+\
+
+Let’s now consider an alternative prior density to model our beliefs about Joe’s true IQ. Any symmetric density instead of a normal could be used, so we use a $t$ density with location $\mu$, scale $\tau$, and 2 degrees of freedom. Since our prior median is 100, we let the median of our $t$ density be equal to $\mu = 100$. We find the scale parameter $\tau$, so the $t$ density matches our prior belief that the 95th percentile of $\theta$ is equal to 120. Note that
+
+\
+
+$$P(\theta < 120) = P(T < \frac{20}{\tau}) = 0.95 \ ,$$
+
+\
+
+where $T$ is a standard $t$ variate with 2 degrees of freedom. It follows that
+
+\
+
+$$\tau = 20/t_{2}(0.95) \ ,$$
+
+\
+
+where $t_{v}(p)$ is the $p$th quantile of a $t$ random variable with $v$ degrees of freedom.
+
+\
+\
+
+We find $\tau$ by using the $t$ quantile function _qt_ in R.
+
+```{r}
+tscale <- 20/qt(0.95, 2)
+tscale
+```
+
+\
+\
+
+We display the normal and $t$ priors in a single graph as the following.
+
+```{r}
+curve(1/tscale*dt((x-mu)/tscale,2), from=60, to=140, xlab="theta", ylab="Prior density")
+curve(dnorm(x, mean=mu, sd=tau), add=T, lwd=3)
+legend("topright", legend=c("t density", "normal density"), lwd=c(1,3))
+```
+
+Although they have the same basic shape, note that the $t$ density has significantly flatter tails -– we will see that this will impact the posterior density for “extreme” test scores.
+
+\
+\
+
+We perform the posterior calculations using the $t$ prior for each of the possible sample results. Note that the posterior density of $\theta$ is given, up to a proportionality constant, by
+
+\
+
+$$g(\theta|data) \propto \phi(\bar{y}|\theta, \sigma/\sqrt{n})g_{T}(\theta|v,\mu,\tau) \ ,$$
+
+\
+
+where $\phi(y|\theta,\sigma)$ is a normal density with mean $\theta$ and standard deviation $\sigma$, and $g_{T}(\mu|v,\mu,\tau)$ is a $t$ density with median $\mu$, scale parameter $\tau$, and degrees of freedom $v$. 
+
+\
+\
+
+Since this density does not have a convenient functional form, we summarize it using a direct “prior times likelihood” approach. We construct a grid of $\theta$ values that covers the posterior density, compute the product of the normal likelihood and the $t$ prior on the grid, and convert these products to probabilities by dividing by the sum. Essentially we are approximating the continuous posterior density by a discrete distribution on his grid. We then use this discrete distribution to compute the posterior mean and posterior standard deviation. 
+
+\
+
+We first write a function norm.t.compute() that implements this computational algorithm for a single value of $\bar{y}$. Then, using sapply(), we apply this algorithm for the three values of $\bar{y}$, and the posterior moments are displayed in the second and third columns of the R matrix _summ2_.
+
+```{r}
+norm.t.compute <- function(ybar){
+  theta <- seq(60, 180, length=500)
+  like <- dnorm(theta, mean=ybar, sd=sigma/sqrt(n))
+  prior <- dt((theta - mu)/tscale, 2)
+  post <- prior*like
+  post <- post/sum(post)  # converting to probabilities
+  m <- sum(theta*post)
+  s <- sqrt(sum(theta^2 * post) - m^2)
+  c(ybar, m, s)
+}
+
+summ2 <- t(sapply(c(110, 125, 140), norm.t.compute))
+dimnames(summ2)[[2]] <- c("ybar", "mu1 t", "tau1 t")
+summ2
+```
+
+\
+\
+
+Let's compare the posterior moments of $\theta$ using the two priors by combining the two R matrices _summ1_ and _summ2_.
+
+```{r}
+cbind(summ1, summ2)
+```
+
+When $\bar{y} = 110$, the values of the posterior mean and posterior standard deviation are similar using the normal and $t$ priors. However, there can be substantial differences in the posterior moments using the two priors when the observed mean score is inconsistent with the prior mean, especially in the “extreme” case where $\bar{y} = 140$.
+
+\
+\
+
+#### Let's visualize the "extreme" case.
+
+```{r}
+theta <- seq(60, 180, length=500)
+normpost <- dnorm(theta, mu1[3], tau1)
+normpost <- normpost/sum(normpost)
+plot(theta, normpost, type="l", lwd=3, ylab="Posterior density", main="Posterior densities for IQ using normal and t priors for extreme obs.")
+like <- dnorm(theta, mean=140, sd=sigma/sqrt(n))
+prior <- dt((theta-mu)/tscale, 2)
+tpost <- prior * like / sum(prior * like)
+lines(theta, tpost)
+legend("topright", legend=c("t prior", "normal prior"), lwd=c(1,3))
+```
+
+When a normal prior is used, the posterior will always be a compromise between the prior information and the observed data, even when the data result conflicts with one’s prior beliefs about the location of Joe’s IQ. In contrast, when a $t$ prior is used, the likelihood will be in the flat-tailed portion of the prior and the posterior will resemble the likelihood function.
+
+\
+
+In this case, **_the inference about the mean is robust to the choice of prior (normal or $t$) when the observed mean IQ score is consistent with the prior beliefs. But in the case where an extreme IQ score is observed, we see that the inference is not robust to the choice of prior density_**.
+
+\
+\
+\
+\
+\
+\
+\
+
+## Mixtures of conjugate priors
+
+\
+
+In the binomial, Poisson, and normal sampling models, we have illustrated the use of a conjugate prior where the prior and posterior distributions have the same functional form. One straightforward way to extend the family of conjugate priors is by using discrete mixtures. 
+
+\
+
+Here we illustrate the **_use of a mixture of beta densities to learn about the probability that a biased coin lands heads_**. Suppose a special coin is known to have a significant bias, but we don’t know if the coin is biased toward heads or tails. If $p$ represents the probability that the coin lands heads, we believe that either $p$ is in the neighborhood of 0.3 or in the neighborhood of 0.7 and it is equally likely that $p$ is in one of the two neighborhoods. This belief can be modeled using the prior density
+
+\
+
+$$g(p) = \gamma g_{1}(p) + (1 - \gamma)g_{2}(p) \ ,$$
+
+\
+
+where $g_{1}$ is $beta(6,14)$, $g_{2}$ is $beta(14,6)$, and the **_mixing probability_** is $\gamma = 0.5$. The following graph displays this prior that reflects a belief in a biased coin.
+
+\
+
+![](/Users/jaeyonglee/Documents/College/RStudio/BCR/image/ss.png)
+
+\
+
+In this situation, it can be shown that we have a conjugate analysis, as the prior and posterior distributions are represented by the same "mixture of betas" functional form. Suppose we flip the coin $n$ times, obtaining $s$ heads and $\mathrm{f} = n - s$ tails. The posterior density of the proportion has the mixture form
+
+\
+
+$$g(p|data) = \gamma (data) g_{1}(p|data) + (1 - \gamma (data)) g_{2}(p|data) \ ,$$
+
+\
+
+where $g_{1}$ is $beta(6+s, 14+\mathrm{f})$, $g_{2}$ is $beta(14+s, 6+\mathrm{f})$, and the **_mixing probability_** $\gamma (data)$ has the form
+
+\
+
+$$\gamma (data) = \frac{\gamma f_{1}(s,\mathrm{f})}{\gamma f_{1}(s,\mathrm{f}) + (1-\gamma)f_{2}(s,\mathrm{f})} \ ,$$
+
+\
+
+where $f_{j}(s,\mathrm{f})$ is the prior predictive probability of $s$ heads in $n$ flips when $p$ has the prior density $g_{j}$.
+
+\
+\
+
+The R function binomial.beta.mix() in the _LearnBayes_ package computes the posterior distribution when the proportion $p$ has a mixture of betas prior distribution. The inputs to this function are _probs_, the vector of mixing probabilities; _betapar_, a matrix of beta shape parameters where each row corresponds to a component of the prior; and _data_, the vector of the number of successes and number of failures in the sample. The output of the function is a list with two components –- _probs_ is a vector of posterior mixing probabilities and _betapar_ is a matrix containing the shape parameters of the updated beta posterior densities.
+
+\
+
+Suppose we flip the coin 10 times and obtain 7 heads and 3 tails.
+
+```{r}
+library(LearnBayes)  # for binomial.beta.mix()
+probs <- c(0.5, 0.5)  # the mixing probabilities
+beta.par1 <- c(6,14)
+beta.par2 <- c(14,6)
+betapar <- rbind(beta.par1, beta.par2)
+data <- c(7,3)
+post <- binomial.beta.mix(probs, betapar, data)
+post
+```
+
+From the output we see that the posterior distribution of $p$ is given by the beta mixture
+
+\
+
+$$g(p|data) = 0.093beta(13,17) + 0.907beta(21,9) \ .$$
+
+\
+\
+
+Let's plot the prior and posterior densities for the proportion.
+
+```{r}
+curve(post$probs[1]*dbeta(x,13,17)+post$probs[2]*dbeta(x,21,9), from=0, to=1, lwd=3, xlab="P", ylab="Density", main="Prior and posterior densities of a proportion for the biased coin")
+curve(0.5*dbeta(x,6,12)+0.5*dbeta(x,12,6), 0, 1, add=T)
+legend("topleft", legend=c("Prior","Posterior"), lwd=c(1,3))
+```
+
+Initially we were indifferent to the direction of the bias of the coin, and each component of the beta mixture had the same weight. **_Since a high proportion of heads was observed_**, there is evidence that the coin is **_biased toward heads_** and the **_posterior density places a greater weight on the second component of the mixture_**.
+
+\
+\
+\
+\
+\
+\
+\
+
+## A Bayesian test of the fairness of a coin
+
+\
+
+Mixture of priors is useful in the development of a Bayesian test of two hypotheses about a parameter. Suppose you are interested in assessing the fairness of a coin. You observe $y$ binomially distributed with parameters $n$ and $p$, and you are interested in testing the hypothesis $\mathrm{H}$ that $p = 0.5$. If $y$ is observed, then it is usual practice to make a decision on the basis of the p-value
+
+\
+
+$$2 \times min\left \{ P(Y \leq y), P(Y \geq y) \right \}.$$
+
+\
+
+If this p-value is _small_, then we reject the hypothesis $\mathrm{H}$ and conclude that the coin is not fair.
+
+\
+\
+
+Suppose, for example, the coin is flipped 20 times and only 5 heads are observed. In R, we can compute the probability of obtaining 5 or fewer heads as the following.
+
+```{r}
+pbinom(5, 20, 0.5)
+```
+
+The p-value here is $2 \times 0.021 = .042$. Since this value is smaller than the common significance level of 0.05, you would decide to reject the hypothesis $\mathrm{H}$ and conclude that the coin is not fair.
+
+\
+\
+
+Let’s consider this problem from a **_Bayesian perspective_**. There are two possible models here –- either the coin is fair ($p = 0.5$) or the coin is not fair ($p \neq 0.5$). Suppose that you are indifferent between the two possibilities, so you initially assign each model a probability of 0.5. Now, if you believe the coin is fair, then your entire prior distribution for $p$ would be concentrated on the value $p = 0.5$. If instead the coin is unfair, you would assign a different prior distribution on (0, 1), call it $g_{1}(p)$, that would reflect your beliefs about the probability of an unfair coin. 
+
+\
+
+Suppose you assign a $beta(a,a)$ prior on $p$. This beta distribution is symmetric about 0.5 –- it says that you believe the coin is not fair, and the probability is close to $p = 0.5$. To summarize, your prior distribution in this testing situation can be written as the mixture
+
+\
+
+$$g(p) = 0.5I(p=0.5) + 0.5I(p \neq 0.5)g_{1}(p),$$
+
+\
+
+where $I(A)$ is an indicator function equal to 1 if the event A is true and otherwise is equal to 0.
+
+\
+
+After observing the number of heads $n$ tosses, we would update our prior distribution by Bayes' rule. The posterior density for $p$ can be written as
+
+\
+
+$$g(p|y) = \lambda(y)I(p=0.5) + (1-\lambda(y))g_{1}(p|y),$$
+
+\
+
+where $g_{1}$ is a $beta(a+y, a+n-y)$ density and $\lambda(y)$ is the posterior probability of the model where the coin is fair,
+
+\
+
+$$\lambda(y) = \frac{0.5p(y|0.5)}{0.5p(y|0.5) + 0.5m_{1}(y)}.$$
+
+\
+
+In the expression for $\lambda(y)$, $p(y|0.5)$ is the binomial density for $y$ when $p = 0.5$, and $m_{1}(y)$ is the (prior) predictive density for $y$ using the beta density.
+
+\
+\
+
+In R, the posterior probability of fairness $\lambda(y)$ is easily computed. The R command dbinom() will compute the binomial probability $p(y|0.5)$, and the predictive density for $y$ can be computed using the identity
+
+\
+
+$$m_{1}(y) = \frac{f(y|p)g_{1}(p)}{g_{1}(p|y)}.$$
+
+\
+\
+
+Assume first that we assign a $beta(10, 10)$ prior for $p$ when the coin is not fair and we observe $y=5$ heads in $n=20$ tosses. The posterior probability of fairness is stored in _lambda_.
+
+```{r}
+n <- 20
+y <- 5
+a <- 10
+p <- 0.5
+m1 <- dbinom(y, n, p)*dbeta(p, a, a)/dbeta(p, a+y, a+n-y)
+lambda <- dbinom(y, n, p)/(dbinom(y, n, p) + m1)
+lambda
+```
+
+We get the surprising result that the posterior probability of the hypothesis of fairness $\mathrm{H}$ is 0.28, which is less evidence against fairness than is implied by the p-value calculation above.
+
+\
+\
+
+The function pbetat() in the _LearnBayes_ package performs a test of a binomial proportion. The inputs to the function are the value of $p$ to be tested, the prior probability of that value, a vector of parameters of the beta prior when the hypothesis is not true, and a vector of numbers of successes and failures.
+
+```{r}
+pbetat(p, 0.5, c(a,a), c(y,n-y))
+```
+
+The output variable _post_ is the posterior probability that $p=0.5$, which agrees with the calculation. The output variable _bf_ is the **_Bayes factor in support of the null hypothesis_**.
+
+\
+\
+
+Since the choice of the prior parameter $a = 10$ in this analysis seems arbitrary, it is natural to ask about the **_sensitivity of this posterior calculation to the choice of this parameter_**. To answer this question, we first write a short function prob.fair() that computes the probability of a fair coin as a function of $log(a)$.
+
+```{r}
+prob.fair = function(log.a){
+  a = exp(log.a)
+  m2 = dbinom(y,n,p) * dbeta(p,a,a) / dbeta(p,a+y,a+n-y)
+  dbinom(y,n,p) / (dbinom(y,n,p) + m2)
+}
+```
+
+\
+\
+
+Then we graph the posterior probability for a range of values of $log(a)$.
+
+```{r}
+n = 20
+y = 5
+p = 0.5
+
+curve(prob.fair(x), from=-4, to=5, xlab="log(a)", ylab="Prob(coin is fair)", lwd=2, main="Posterior prob. that a coin is fair graphed against values of log(a)")
+```
+
+We see from this graph that **_the probability of fairness appears to be greater than 0.2 for all choices of $a$_**. It is important to remember that the p-value is NOT interpretable as a probability of fairness, although it is sometimes mistakenly viewed as this probability. But the **_Bayesian posterior probability of 0.2 is larger than the p-value calculation of 0.042, suggesting that the p-value is overstating the evidence against the hypothesis that the coin is fair_**.
+
+\
+\
+
+Another distinction between the frequentist and Bayesian calculations is the event that led to the decision about rejecting the hypothesis that the coin was fair. The p-value calculation was based on the probability of the event “5 heads or fewer,” but **_the Bayesian calculation was based solely on the likelihood based on the event “exactly 5 heads.”_** That raises the question: **_How would the Bayesian answers change if we observed “5 heads or fewer”?_** One can show that the posterior probability that the coin is fair is given by
+
+\
+
+$$\lambda(y) = \frac{0.5P_{0}(Y \leq 5)}{0.5P_{0}(Y \leq 5) + 0.5P_{1}(Y \leq 5)},$$
+
+\
+
+where $P_{0}(Y \leq 5)$ is the probability of 5 heads or fewer under the binomial model with $p=0.5$ and $P_{1}(Y \leq 5)$ is the predictive probability of this event under the alternative model with a $beta(10,10)$ prior on $p$. 
+
+\
+\
+
+In the following R output, the cumulative probability of 5 heads under the binomial model is computed by the R function pbinom(). The probability of 5 or fewer heads under the alternative model is computed by summing the predictive density over the six values of $y$.
+
+```{r}
+n = 20
+y = 5
+a = 10
+p = 0.5
+m2 = 0
+for(k in 0:y)
+  m2 = m2 + dbinom(k,n,p) * dbeta(p,a,a) / dbeta(p, a+k, a+n-k)
+
+lambda = pbinom(y,n,p) / (pbinom(y,n,p) + m2)
+lambda
+```
+
+Note that the posterior probability of fairness is .218 based on the data “5 heads or fewer.” This posterior probability is smaller than the value of .280 found earlier based on $y = 5$. This is a reasonable result since observing “5 heads or fewer” is stronger evidence against fairness than the result “5 heads.”
+
+\
+\
+\
+\
+\
+\
+\
+
+## Summary of R functions
+
+\
+
+**_binomial.beta.mix()_** – computes the parameters and mixing probabilities for a binomial sampling problem where the prior is a discrete mixture of beta densities
+
+_Usage_: binomial.beta.mix(probs,betapar,data)
+
+_Arguments_: probs, vector of probabilities of the beta components of the prior; betapar, matrix where each row contains the shape parameters for a beta component of the prior; data, vector of number of successes and number of failures
+
+_Value_: probs, vector of probabilities of the beta components of the posterior; betapar, matrix where each row contains the shape parameters for a beta component of the posterior
+
+\
+
+**_normal.select()_** – finds the mean and standard deviation of a normal density that matches knowledge of two quantiles of the distribution
+
+_Usage_: normal.select(quantile1,quantile2)
+
+_Arguments_: quantile1, list with components p, the value of the first probability, and x, the value of the first quantile; quantile2, list with components p, the value of the second probability, and x, the value of the second quantile 
+
+_Value_: mean, mean of the matching normal distribution; sigma, standard deviation of the matching normal distribution
+
+\
+
+**_pbetat()_** – Bayesian test that a proportion is equal to a specified prior using a beta prior
+
+_Usage_: pbetat(p0,prob,ab,data)
+
+_Arguments_: p0, the value of the proportion to be tested; prob, the prior probability of the hypothesis; ab, the vector of parameter values of the beta prior under the alternative hypothesis; data, vector containing the number of successes and number of failures
+
+_Value_: bf, the Bayes factor in support of the null hypothesis; post, the posterior probability of the null hypothesis
+
+\
+\
+\
+\
+\
+\
+\
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
