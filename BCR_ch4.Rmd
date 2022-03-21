@@ -1,0 +1,691 @@
+---
+title: "Bayesian Computation with R"
+output:
+  html_notebook:
+    toc: yes
+---
+
+<style type="text/css">
+
+body, td {
+   font-size: 17px;  # body, td, is for normal text
+}
+code.r{
+  font-size: 12px;  # code.r is for r code
+}
+pre {
+  font-size: 10px  # pre is for output of knitr chunks
+}
+</style>
+
+\
+\
+
+This notebook was made with 'Bayesian Computation with R' by Jim Albert as reference. This notebook is for personal use only.
+
+\
+\
+\
+
+# Ch.4 Multiparameter models
+
+\
+
+In this chapter, we describe the use of R to summarize Bayesian models with several unknown parameters. In learning about parameters of a normal population or multinomial parameters, posterior inference is accomplished by simulating from distributions of standard forms. Once a simulated sample is obtained from the joint posterior, it is straightforward to perform transformations on these simulated draws to learn about any function of the parameters. We next consider estimating the parameters of a simple logistic regression model. Although the posterior distribution does not have a simple functional form, it can be summarized by computing the density on a fine grid of points. A common inference problem is to compare two proportions in a $2 \times 2$ contingency table. We illustrate the computation of the posterior probability that one proportion exceeds the second proportion in the situation in which one believes a priori that the proportions are dependent.
+
+\
+\
+\
+
+## Normal data with both parameters _unknown_
+
+\
+
+A standard inference problem is to learn about a normal population where both the mean and variance are unknown. To illustrate Bayesian computation for this problem, suppose we are interested in learning about the distribution of completion times for men between ages 20 and 29 who are running the New York Marathon. We observe the times $y_{1}, \cdots, y_{20}$ in minutes for 20 runners, and we assume they represent a random sample from an $N(\mu,\sigma)$ distribution. If we assume the standard noninformative prior $g(\mu,\sigma^{2}) \propto 1/\sigma^{2}$, then the posterior density of the mean and variance is given by
+
+\
+
+$$g(\mu, \sigma^{2}|y) \propto \frac{1}{(\sigma^{2})^{\frac{n}{2} + 1}}exp\left ( -\frac{1}{2\sigma^{2}}(S + n(\mu - \bar{y})^{2}) \right ),$$
+
+\
+
+where $n$ is the sample size, $\bar{y}$ is the sample mean, and $S = \sum_{i=1}^{n}(y_{i}-\bar{y})^{2}$.
+
+\
+
+This joint posterior has the familiar normal/inverse chi-square form where
+
+- the posterior of $\mu$ conditional on $\sigma^{2}$ is distributed as $N(\bar{y}, \sigma/\sqrt{n})$
+- the marginal posterior of $\sigma^{2}$ is distributed as $S_{\chi_{n-1}^{-2}}$, where $\chi_{v}^{-2}$ denotes an inverse chi-square distribution with $v$ degrees of freedom
+
+\
+\
+
+We first use R to construct a contour plot of the joint posterior density for this example. We read in the data _marathontimes_ from the _LearnBayes_ package; we can use the variable _time_ that contains the vector of running times. 
+
+\
+
+The R function normchi2post() in the _LearnBayes_ package computes the logarithm of the joint posterior density of $(\mu,\sigma^{2})$. We also use a function mycontour() in the _LearnBayes_ package that facilitates the use of the R contour() command. There are four inputs to mycontour(): the name of the function that defines the log density, a vector with the values (xlo, xhi, ylo, and yhi) that define the rectangle where the density is to be graphed, the data used in the function for the log density, and any optional parameters used with contour. 
+
+\
+
+The function produces a contour graph, where the contour lines are drawn at 10%, 1%, and 0.1% of the maximum value of the posterior density over the grid.
+
+```{r}
+library(latex2exp)  # for TeX()
+library(LearnBayes)  # for marathontimes data, normchi2post(), and mycontour()
+data(marathontimes)
+mt <- marathontimes
+
+d <- mycontour(normchi2post, c(220, 330, 500, 9000), mt$time, xlab="mean\n", ylab="variance", sub=TeX("Contour plot of the joint posterior distribution of $(\\mu, \\sigma^{2})$ for a normal sampling model."))
+```
+
+\
+\
+
+It is convenient to summarize this posterior distribution by simulation. One can simulate a value of $(\mu, \sigma^{2})$ from the joint posterior by first simulating $\sigma^{2}$ from an $S_{\chi_{n-1}^{-2}}$ distribution and then simulating $\mu$ from the $N(\bar{y}, \sigma/\sqrt{n})$ distribution. 
+
+\
+
+In the following R output, we first simulate a sample of size 1000 from the chi-square distribution using the function rchisq(). Then simulated draws of the “scale times inverse chi-square” distribution of the variance $\sigma^{2}$ are obtained by transforming the chi-square draws. Finally, simulated draws of the mean $\mu$ are obtained using the function rnorm().
+
+```{r}
+S = sum((mt$time - mean(mt$time))^2)  # sample variance
+n = length(mt$time)
+sigma2 = S/rchisq(1000, n-1)
+mu = rnorm(1000, mean=mean(mt$time), sd=sqrt(sigma2)/sqrt(n))
+```
+
+The function normpostsim() in the _LearnBayes_ package can also implement this simulation algorithm.
+
+\
+\
+
+We display the simulated sampled values of $(\mu, \sigma^{2})$ on top of the contour plot of the distribution we saw previously.
+
+```{r}
+d <- mycontour(normchi2post, c(220, 330, 500, 9000), mt$time, xlab="mean\n", ylab="variance", sub="The points represent a simulated random sample from this distribution.")
+points(mu, sigma2)
+```
+
+\
+\
+
+Inferences about the parameters or functions of the parameters are available from the simulated sample. To construct a 95% interval estimate for the mean $\mu$, we use the R quantile function to find percentiles of the simulated sample of $\mu$.
+
+```{r}
+quantile(mu, c(0.025, 0.975))
+```
+
+A 95% credible interval for the mean completion time is (254.7, 301.7) minutes.
+
+\
+\
+
+Suppose we are interested in learning about the standard deviation $\sigma$ that describes the spread of the population of marathon running times. To obtain a sample of the posterior of $\sigma$, we take square roots of the simulated draws of $\sigma^{2}$. 
+
+```{r}
+quantile(sqrt(sigma2), c(0.025, 0.975))
+```
+
+We see that an approximate 95% probability interval for $\sigma$ is (37.7, 72.5) minutes.
+
+\
+\
+\
+\
+\
+\
+\
+
+## A multinomial model
+
+\
+
+Gelman et al. (2003) describe a sample survey conducted by CBS News before the 1988 presidential election. A total of 1447 adults were polled to indicate their preference; $y_{1} = 727$ supported George Bush, $y_{2} = 583$ supported Michael Dukakis, and $y_{3} = 137$ supported other candidates or expressed no opinion. The counts $y_{1}$, $y_{2}$, and $y_{3}$ are assumed to have a multinomial distribution with sample size $n$ and respective probabilities $\theta_{1}$, $\theta_{2}$, and $\theta_{3}$. If a uniform prior distribution is assigned to the multinomial vector $\theta = (\theta_{1},\theta_{2},\theta_{3})$, then the posterior distribution of $\theta$ is proportional to
+
+\
+
+$$g(\theta) = \theta_{1}^{y_{1}}\theta_{2}^{y_{2}}\theta_{3}^{y_{3}},$$
+
+\
+
+which is recognized as a Dirichlet distribution with parameters $(y_{1} + 1, y_{2} + 1, y_{3} + 1)$. The focus is to compare the proportions of voters for Bush and Dukakis by considering the difference $\theta_{1} − \theta_{2}$.
+
+\
+\
+
+The summarization of the Dirichlet posterior distribution is again conveniently done by simulation. Although the base R package does not have a function to simulate Dirichlet variates, it is easy to write a function to simulate this distribution based on the fact that if $W_{1} , W_{2} , W_{3}$ are independently distributed from $gamma(\alpha_{1},1)$, $gamma(\alpha_{2},1)$, $gamma(\alpha_{3},1)$ distributions and $T = W_{1} + W_{2} + W_{3}$, then the distribution of the proportions $(W_{1}/T,W_{2}/T,W_{3}/T)$ has a $Dirichlet(\alpha_{1},\alpha_{2},\alpha_{3})$ distribution. 
+
+\
+
+The R function rdirichlet() in the package _LearnBayes_ uses this transformation of random variates to simulate draws of a Dirichlet distribution. One thousand vectors $\theta$ are simulated and stored in the matrix _theta_.
+
+```{r}
+alpha <- c(728, 584, 138)
+theta <- rdirichlet(1000, alpha)
+```
+
+\
+\
+
+Since we are interested in comparing the proportions for Bush and Dukakis, we focus on the difference $\theta_{1} - \theta_{2}$. Let's draw a histogram of the simulated draws of this difference. 
+
+```{r}
+library(latex2exp)  # for TeX()
+hist(theta[,1] - theta[,2], main="", xlim=c(0,0.2), xlab=TeX("$\\theta_{1} - \\theta_{2}$"), sub=TeX("Histogram of simulated sample of the marginal post. dstn of $\\theta_{1} - \\theta_{2}$"))
+```
+
+Note that **_all of the mass of this distribution is on positive values_**, indicating that there is strong evidence that **_the proportion of voters for Bush exceeds the proportion for Dukakis_**.
+
+\
+\
+
+In the United States presidential election, there are 50 states plus the District of Columbia, and each has an assigned number of electoral votes. The candidate receiving the largest number of votes in a particular state receives the corresponding number of electoral votes, and for a candidate to be elected, he or she must receive a majority of the total number (538) of electoral votes. In the 2008 election between Barack Obama and John McCain, suppose we wish to predict the total number of electoral votes $EV_{O}$ obtained by Obama. Let $\theta_{Oj}$ and $\theta_{Mj}$ denote the proportion of voters respectively for Obama and McCain in the $j$th state. One can express the number of electoral votes for Obama as
+
+\
+
+$$EV_{O} = \sum_{j=1}^{51}EV_{j}I(\theta_{Oj} > \theta_{Mj}),$$
+
+\
+
+where $EV_{j}$ is the number of electoral votes in the $j$th state and $I()$ is the indicator function, which is equal to 1 if the argument is true and 0 otherwise.
+
+\
+
+On the Sunday before Election Day, the website 'www.cnn.com' gives the results of the most recent poll in each state. Let $q_{Oj}$ and $q_{Mj}$ denote the sample proportions of voters for Obama and McCain in the $j$th state. We make the conservative assumption that each poll is based on a sample of 500 voters. Assuming a uniform prior on the vector of proportions, the vectors $(\theta_{O1},\theta_{M1}),\cdots,(\theta_{O51},\theta_{M51})$ have independent posterior distributions, where the proportions favoring the candidates in the$i$th state, $(\theta_{Oi}, \theta_{Mi}, 1 − \theta_{Oi}, \theta_{Mi})$, have a Dirichlet distribution with parameters $(500q_{Oj} +1, 500q_{Mj} + 1,500(1−q_{Oj} −q_{Mj})+1)$.
+
+\
+\
+
+Based on the posterior distribution of the state proportions, one can simulate from the posterior distribution of the electoral votes for Obama. The dataset _election.2008_ in the _LearnBayes_ package contains for each state the percentage of voters in the poll for McCain _M.pct_, the percentage of voters in the poll for Obama _O.pct_, and the number of electoral votes _EV_.
+
+```{r}
+library(LearnBayes)
+data(election.2008)
+elec <- election.2008
+elec
+```
+
+\
+\
+
+We write a short function prob.Obama() that will use simulation from the Dirichlet distributions to compute the posterior probability that $\theta_{Oj}$ exceeds $\theta_{Mj}$ in the $j$th state.
+
+```{r}
+prob.Obama = function(j){
+  p = rdirichlet(5000, 500*c(elec$M.pct[j], elec$O.pct[j], 100-elec$M.pct[j] - elec$O.pct[j])/100 + 1)
+  mean(p[,2]>p[,1])
+}
+```
+
+\
+\
+
+We compute this Obama win probability for all states by using the sapply() function.
+
+```{r}
+Obama.win.probs = sapply(1:51, prob.Obama)
+```
+
+\
+\
+
+Now that we have the win probabilities, we can simulate from the posterior distribution of the Obama electoral votes by flipping a set of 51 biased coins, where the coin probabilities correspond to the Obama state win probabilities. Then we compute the number of Obama electoral votes based on the results of the coin flips. We implement one simulation using the function sim.election() and repeat this simulation 1000 times using the replicate() function. The vector _sim.EV_ contains the number of electoral votes in the simulations.
+
+```{r}
+sim.election = function(){
+  winner = rbinom(51, 1, Obama.win.probs)
+  sum(elec$EV*winner)
+}
+
+sim.EV = replicate(1000, sim.election())
+```
+
+\
+\
+
+We construct a histogram of the posterior of $EV_{O}$.
+
+```{r}
+hist(sim.EV, min(sim.EV):max(sim.EV), col="blue", xlab="", main="", sub="Histogram of 1000 simulated draws of the total electoral vote for Obama. \n The actual electoral vote of 365 is indicated by the black vertical line.")
+abline(v=365, lwd=3)
+text(375, 30, "Actual \n Obama \n total")
+```
+
+The actual Obama electoral vote total of 365 is displayed on the graph. It would have been possible to improve our prediction by using more data than just the results of a single poll in each state. But the actual electoral vote total did fall within the 90% equal-tail prediction interval.
+
+\
+\
+\
+\
+\
+\
+\
+
+## A bioassay experiment
+
+\
+
+In the development of drugs, bioassay experiments are often performed on animals. In a typical experiment, various dose levels of a compound are ad- ministered to batches of animals and a binary outcome (positive or negative) is recorded for each animal. We consider data from Gelman et al. (2003), where one observes a dose level (in log g/ml), the number of animals, and the number of deaths for each of four groups. The data are displayed in Table 4.1.
+
+\
+
+![](/Users/jaeyonglee/Documents/College/RStudio/BCR/image/ss2.png)
+
+\
+
+Let $y_{i}$ denote the number of deaths observed out of $n_{i}$ with dose level $x_{i}$. We assume $y_{i}$ is $binomial(n_{i},p_{i})$, where the probability $p_{i}$ follows the logistic model
+
+\
+
+$$log(p_{i}/(1-p_{i})) = \beta_{0} + \beta_{1}x_{i}.$$
+
+\
+
+The likelihood function of the unknown regression parameters $\beta_{0}$ and $\beta_{1}$ is given by
+
+\
+
+$$L(\beta_{0}, \beta_{1}) \propto \prod_{i=1}^{4} p_{i}^{y_{i}}(1-p_{i})^{n_{i}-y_{i}},$$
+
+\
+
+where $p_{i} = exp(\beta_{0} + \beta_{1}x_{i})/(1 + exp(\beta_{0} + \beta_{1}x_{i})).$
+
+\
+\
+
+We begin in R by defining the covariate vector _x_ and the vectors of sample sizes and observed success counts _n_ and _y_.
+
+```{r}
+x = c(-0.86, -0.3, -0.05, 0.73)
+n = c(5, 5, 5, 5)
+y = c(0, 1, 3, 5)
+data = cbind(x, n, y)
+data
+```
+
+\
+\
+
+A standard classical analysis fits the model by maximum likelihood. The R function glm() is used to do this fitting, and the summary output presents the estimates and the associated standard errors.
+
+```{r}
+response = cbind(y, n-y)
+results = glm(response ~ x, family=binomial)
+summary(results)
+```
+
+\
+\
+
+Suppose that the user has prior beliefs about the regression parameters that she inputs through the following conditional means prior. This prior is constructed by thinking about the probability of death at two different dose levels, $x_{L}$ and $x_{H}$. When the dose level is $x_{L}$ = −0.7, the median and 90th percentile of the probability of death $p_{L}$ are respectively 0.2 and 0.5. 
+
+\
+
+One matches this information with a beta prior using the beta.select() function.
+
+```{r}
+beta.select(list(p=0.5,x=0.2),list(p=0.9,x=0.5))
+```
+
+We see that this prior information is matched with a $beta(1.12, 3.56)$ distribution for $p_{L}$. 
+
+\
+\
+
+When the dose level is $x_{H}$ = 0.6, the user believes that the median and 90th percentile of the probability of death $p_{H}$ are given respectively by 0.8 and 0.98. 
+
+\
+
+Again let's usie the beta.select() function.
+
+```{r}
+beta.select(list(p=0.5,x=0.8),list(p=0.9,x=0.98))
+```
+
+
+We see that this prior information is matched with a $beta(2.10, 0.74)$ prior.
+
+\
+\
+
+Suppose that the beliefs about the probability $p_{L}$ are independent of the beliefs about $p_{H}$. Then the joint prior of $(p_{L}, p_{H})$ is given by
+
+$$g(p_{L}, p_{H}) \propto p_{L}^{1.12-1}(1-p_{L})^{3.56-1}p_{H}^{2.10-1}(1-p_{H})^{0.74-1}.$$
+
+\
+
+![](/Users/jaeyonglee/Documents/College/RStudio/BCR/image/ss3.png)
+
+\
+
+Figure 4.4 displays the conditional means prior by using error bars placed on the probability of death for two dose levels. As will be explained shortly, the smooth curve is the fitted probability curve using this prior information.
+
+\
+
+If this prior on $(p_{L},p_{H})$ is transformed to the regression vector $(\beta_{0},\beta_{1})$ through the transformation
+
+\
+
+$$p_{L} = \frac{exp(\beta_{0} + \beta_{1}x_{L})}{1+exp(\beta_{0} + \beta_{1}x_{L})} , \ p_{H} = \frac{exp(\beta_{0} + \beta_{1}x_{H})}{1+exp(\beta_{0} + \beta_{1}x_{H})},$$
+
+\
+
+one can show that the induced prior is
+
+\
+
+$$g(\beta_{0}, \beta_{1}) \propto p_{L}^{1.12}(1-p_{L})^{3.56}p_{H}^{2.10}(1-p_{H})^{0.74}.$$
+
+\
+
+Note that this prior has the same functional form as the likelihood, where the beta parameters can be viewed as the numbers of deaths and survivals in a prior experiment performed at two dose levels (see Table 4.2). If we combine these “prior data” with the observed data, we see that the posterior density is given by
+
+\
+
+$$g(\beta_{0}, \beta_{1}|y) \propto \prod_{i=1}^{6} p_{i}^{y_{i}}(1-p_{i})^{n_{i}-y_{i}},$$
+
+\
+
+where $(x_{j}, n_{j}, y_{j}), \ j = 5,6$, represent the dose, number of deaths, and sample size in the prior experiment.
+
+\
+
+![](/Users/jaeyonglee/Documents/College/RStudio/BCR/image/ss4.png)
+
+\
+
+The log posterior density for $(\beta_{0},\beta_{1})$ in this logistic model is contained in the R function logisticpost(), where the _data_ argument is a matrix with columns dose, number of successes, and sample size. We first combine the data (contained in the matrix data) with the prior data and place them in the matrix _data.new_.
+
+```{r}
+prior = rbind(c(-0.7, 4.68, 1.12), c(0.6, 2.10, 0.74))
+data.new =rbind(data, prior)
+data.new
+```
+
+\
+\
+
+To summarize the posterior distribution, we first find a rectangle that covers essentially all of the posterior probability. The maximum likelihood fit is helpful in giving a first guess at the location of this rectangle.
+
+```{r}
+library(LearnBayes)
+library(latex2exp)
+mycontour(logisticpost, c(-3,3,-1,9), data.new, xlab="beta0", ylab="beta1", sub=TeX("Contour plot of the post. dstn of ($\\beta_{0}, \\beta_{1}$)"))
+```
+
+Note that the contour lines are drawn at 10%, 1%, and 0.1% of the model height. We see that the rectangle $−3 \leq \beta_{0} \leq 3$, $−1 \leq \beta_{1} \leq 9$ contains the contours that are greater than 0.1% of the modal value.
+
+\
+\
+
+Now that we have found the posterior distribution, we use the function simcontour() to simulate pairs of $(\beta_{0},\beta_{1})$ from the posterior density computed on this rectangular grid. We display the contour plot with the points superimposed to confirm that we are sampling from the posterior distribution.
+
+```{r}
+s = simcontour(logisticpost, c(-2,3,-1,11), data.new, 1000)
+mycontour(logisticpost, c(-3,3,-1,9), data.new, xlab="beta0", ylab="beta1", sub="A simulated random sample from the post. dstn is shown on top of the contour plot.")
+points(s)
+```
+
+\
+\
+
+We illustrate several types of inferences for this problem. Let's first display a density estimate of the simulated values (using the R function density()) of the slope parameter $\beta_{1}$. 
+
+```{r}
+library(latex2exp)
+plot(density(s$y), xlab=TeX("$\\beta_{1}$"), main="", sub=TeX("Density of simulated values from the posterior of the slope parameter $\\beta_{1}$"))
+```
+
+All of the mass of the density of $\beta_{1}$ is on positive values, indicating that there is significant evidence that increasing the level of the dose does increase the probability of death.
+
+\
+\
+
+In this setting, one parameter of interest is the LD-50, the value of the dose $x$ such that the probability of death is equal to one-half. It is straightforward to show that the LD-50 is equal to $\theta = -\beta_{0}/\beta_{1}$. One can obtain a simulated sample from the marginal posterior density of $\theta$ by computing a value of $\theta$ from each simulated pair $(\beta_{0}, \beta_{1})$. 
+
+\
+
+Let's plot its histogram.
+
+```{r}
+theta = -s$x/s$y
+hist(theta, xlab="LD-50", breaks=20, main="", sub="Histogram of simluated values of the LD-50 parameter")
+```
+
+In contrast to the histogram of $\beta_{1}$, the LD-50 is more difficult to estimate and the posterior density of this parameter is relatively wide. 
+
+\
+\
+
+We compute a 95% credible interval from the simulated draws of $\theta$.
+
+```{r}
+quantile(theta, c(0.025, 0.975))
+```
+
+The probability that $\theta$ is contained in the interval (-0.328, 0.504) is 0.95.
+
+\
+\
+\
+\
+\
+\
+\
+
+## Comparing two proportions
+
+\
+
+Howard (1998) considers the general problem of **_comparing the proportions from two independent binomial distributions_**. Suppose we observe $y_{1}$ distributed as $binomial(n_{1}, p_{1})$, and $y_{2}$ distributed as $binomial(n_{2}, p_{2})$. One wants to know if the data favor the hypothesis $\mathrm{H_{1}} : p_{1} > p_{2}$ or the hypothesis $\mathrm{H_{2}} : p_{1} < p_{2}$ and wants a measure of the strength of the evidence in support of one hypothesis. Howard gives a broad survey of frequentist and Bayesian approaches for comparing two proportions.
+
+\
+
+**_From a Bayesian viewpoint, the important task is the construction of an appropriate prior distribution_**. In Exercise 3, we explore the assumption that $p_{1}$ and $p_{2}$ are independent, where each proportion is assigned a beta prior. In this case, $p_{1}$ and $p_{2}$ have independent beta posterior distributions and it is straightforward to compute the probability of the hypotheses. However, **_the assumption of independence of the proportions is questionable_**, and we consider instead Howard’s “dependent prior” that he recommends for this particular testing problem.
+
+\
+
+Suppose that one is given the information that one proportion is equal to a particular value, say $p_{1} = 0.8$. This knowledge can influence a user’s prior beliefs about the location of the second proportion $p_{2}$. Specifically, if the user is given that $p_{1} = 0.8$, she may also believe that the value of $p_{2}$ is also close to 0.8. **_This belief implies the use of dependent priors for $p_{1}$ and $p_{2}$_**.
+
+\
+
+Howard’s special form of dependent prior is expressed as follows. First the proportions are transformed into the real-valued logit parameters
+
+\
+
+$$\theta_{1} = log\frac{p_{1}}{1 - p_{1}}, \ \theta_{2} = log\frac{p_{2}}{1 - p_{2}}.$$
+
+\
+
+Then suppose that given a value of $\theta_{1}$, the logit $\theta_{2}$ is assumed to be normally distributed with mean $\theta_{1}$ and standard deviation $\sigma$. By generalizing this idea, Howard proposes the dependent prior of the general form
+
+\
+
+$$g(p_{1},p_{2}) \propto e^{-(1/2)u^{2}}p_{1}^{\alpha-1}(1-p_{1})^{\beta-1}p_{2}^{\gamma-1}(1-p_{2})^{\delta-1}, \ 0<p_{1}, p_{2} < 1,$$
+
+\
+
+where $u = \frac{1}{\sigma}(\theta_{1}-\theta_{2}).$
+
+\
+
+This class of dependent priors is indexed by the parameters $(\alpha, \beta, \gamma, \delta, \sigma)$. The first four parameters reflect one’s beliefs about the locations of $p_{1}$ and $p_{2}$, and the parameter $\sigma$ indicates one’s prior belief in the dependence between the two proportions.
+
+\
+\
+
+Suppose that $\alpha = \beta = \gamma = \delta = 1$, reflecting vague prior beliefs about each individual parameter. The logarithm of the dependent prior is defined in the R function howardprior(). Using the function mycontour() we plot contour plots of the dependent prior for values of the association parameter $\sigma$ = 2, 1, 0.5, and 0.25. 
+
+```{r}
+library(latex2exp)
+library(LearnBayes)
+sigma = c(2,1,0.5,0.25)
+plo = 0.0001
+phi = 0.9999
+par(mfrow=c(2,2))
+for(i in 1:4){
+  mycontour(howardprior, c(plo, phi, plo, phi), c(1, 1, 1, 1, sigma[i]), main=paste("sigma =", as.character(sigma[i])), xlab=TeX("$p_{1}$"), ylab=TeX("$p_{2}$"))
+}
+```
+
+Note that as the value of $\sigma$ goes to zero, the prior is placing more of its mass along the line where the two proportions are equal.
+
+\
+\
+
+Suppose we observe counts $y_{1}, y_{2}$ from the two binomial samples. The likelihood function is given by
+
+\
+
+$$L(p_{1}, p_{2}) \propto p_{1}^{y_{1}}(1-p_{1})^{n_{1}-y_{1}}p_{2}^{y_{2}}(1-p_{2})^{n_{2}-y_{2}}, \ 0 < p_{1},p_{2} < 1.$$
+
+\
+
+Combining the likelihood with the prior, one sees that the posterior density has the same functional “dependent” form with updated parameters
+
+\
+
+$$(\alpha + y_{1}, \beta + n_{1} - y_{1}, \gamma + y_{2}, \delta + n_{2} - y_{2}, \sigma).$$
+
+\
+
+We illustrate testing the hypotheses using a dataset discussed by Pearson (1947), shown in Table 4.3.
+
+\
+
+![](/Users/jaeyonglee/Documents/College/RStudio/BCR/image/ss5.png)
+
+\
+\
+
+Since the posterior distribution is of the same functional form as the prior, we can use the same howardprior() function for the posterior calculations. Let's plot contour plots of the posterior for the four values of the association parameter $\sigma$.
+
+```{r}
+library(latex2exp)
+library(LearnBayes)
+
+sigma = c(2, 1, 0.5, 0.25)
+par(mfrow=c(2,2))
+for(i in 1:4){
+  mycontour(howardprior, c(plo, phi, plo, phi), c(1+3, 1+15, 1+7, 1+5, sigma[i]), main=paste("sigma =", as.character(sigma[i])), xlab=TeX("$p_{1}$"), ylab=TeX("$p_{2}$"))
+  lines(c(0,1), c(0,1))
+}
+```
+
+\
+\
+
+We can test the hypothesis $\mathrm{H_{1}}: p_{1} > p_{2}$ simply by computing the posterior probability of this region of the parameter space. We first produce, using the function simcontour(), a simulated sample from the posterior distribution of $(p_{1},p_{2})$, and then find the proportion of simulated pairs where $p_{1} > p_{2}$. 
+
+```{r}
+for(sigma in c(2,1,0.5,0.25)){
+  s = simcontour(howardprior, c(plo, phi, plo, phi), c(1+3, 1+15, 1+7, 1+5, sigma), 1000)
+  cat(sprintf("(sigma = %.2f): P(p1>p2) = %.2f\n", sigma, sum(s$x > s$y)/1000))
+}
+```
+
+We can see the posterior probability that $p_{1}$ exceeds $p_{2}$ for four choices of the dependent prior parameter $\sigma$. Note that **_this posterior probability is sensitive to the prior belief about the dependence between the two proportions_**.
+
+\
+\
+\
+\
+\
+\
+\
+
+## Summary of R functions
+
+\
+
+**_howardprior()_** – computes the logarithm of a dependent prior on two propor- tions proposed by Howard in a Statistical Science paper in 1998
+
+_Usage_: howardprior(xy,par)
+
+_Arguments_: xy, a matrix of parameter values where each row represents a value of the proportions (p1, p2); par, a vector containing parameter values alpha, beta, gamma, delta, sigma
+
+_Value_: vector of values of the log posterior where each value corresponds to each row of the parameters in xy
+
+\
+
+**_logisticpost()_** – computes the log posterior density of (beta0, beta1) when yi are independent binomial(ni, pi) and logit(pi)=beta0+beta1*xi
+
+_Usage_: logisticpost(beta,data)
+
+_Arguments_: beta, a matrix of parameter values where each row represents a value of (beta0, beta1); data, a matrix of columns of covariate values x, sample sizes n, and number of successes y
+
+_Value_: vector of values of the log posterior where each value corresponds to each row of the parameters in beta
+
+\
+
+**_mycontour()_** – for a general two parameter density, draws a contour graph where the contour lines are drawn at 10%, 1%, and .1% of the height at the mode 
+
+_Usage_: mycontour(logf,limits,data,...)
+
+_Arguments_: logf, a function that defines the logarithm of the density; limits, a vector of limits (xlo, xhi, ylo, yhi) where the graph is to be drawn; data, a vector or list of parameters associated with the function logpost; ..., further arguments to pass to contour
+
+_Value_: a contour graph of the density is drawn
+
+\
+
+**_normchi2post()_** – computes the log of the posterior density of a mean M and a variance S2 when a sample is taken from a normal density and a standard noninformative prior is used
+
+_Usage_: normchi2post(theta,data)
+
+_Arguments_: theta, a matrix of parameter values where each row is a value of (M, S2); data, a vector containing the sample observations
+
+_Value_: a vector of values of the log posterior where the values correspond to the rows in theta
+
+\
+
+**_normpostsim()_** – gives a simulated sample from the joint posterior distribution of the mean and variance for a normal sampling prior with a noninformative prior
+
+_Usage_: normpostsim(data,m)
+
+_Arguments_: data, a vector containing the sample observations; m, number of simulations desired
+
+_Value_: mu, vector of simulated draws of normal mean; sigma2, vector of sim- ulated draws of normal variance
+
+\
+
+**_rdirichlet()_** – simulates values from a Dirichlet distribution
+
+_Usage_: rdirichlet(n,par)
+
+_Arguments_: n, the number of simulations required; par, the vector of param- eters of the Dirichlet distribution
+
+_Value_: a matrix of simulated draws, where a row contains one simulated Dirich- let draw
+
+\
+
+**_simcontour()_** – for a general two-parameter density defined on a grid, simulates a random sample
+
+_Usage_: simcontour(logf,limits,data,m)
+
+_Arguments_: logf, a function that defines the logarithm of the density; limits, a vector of limits (xlo, xhi, ylo, yhi) that cover the joint probability density; data, a vector or list of parameters associated with the function logpost; m, the size of the simulated sample
+
+_Value_: x, the vector of simulated draws of the first parameter; y, the vector of simulated draws of the second parameter
+
+\
+\
+\
+\
+\
+\
+\
+
+
+
+
+
+
+
+
+
+
+
+
+
