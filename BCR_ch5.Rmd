@@ -1,0 +1,1041 @@
+---
+title: "Bayesian Computation with R"
+output:
+  html_notebook:
+    toc: yes
+---
+
+<style type="text/css">
+
+body, td {
+   font-size: 17px;  # body, td, is for normal text
+}
+code.r{
+  font-size: 12px;  # code.r is for r code
+}
+pre {
+  font-size: 10px  # pre is for output of knitr chunks
+}
+</style>
+
+\
+\
+
+This notebook was made with 'Bayesian Computation with R' by Jim Albert as reference. This notebook is for personal use only.
+
+\
+\
+\
+
+# Ch.5 Introduction to Bayesian computation
+
+\
+
+In the previous two chapters, **_two types of strategies were used in the summarization of posterior distributions_**. If the sampling density has a familiar functional form, such as a member of an exponential family, and a conjugate prior is chosen for the parameter, then the posterior distribution often is **_expressible in terms of familiar probability distributions_**. In this case, we can simulate parameters directly by using the R collection of random variate functions (such as rnorm(), rbeta(), and rgamma()), and we can summarize the posterior using computations on this simulated sample. A second type of computing strategy is what we called the **_“brute-force” method_**. In the case where **_the posterior distribution is not a familiar functional form, then one simply computes values of the posterior on a grid of points and then approximates the continuous posterior by a discrete posterior that is concentrated on the values of the grid_**. This brute-force method can be generally applied for one- and two-parameter problems such as those illustrated in Chapters 3 and 4.
+
+\
+
+In this chapter, we describe the Bayesian computational problem and introduce some of the more sophisticated computational methods that will be employed in later chapters. **_One general approach is based on the behavior of the posterior distribution about its mode_**. This gives a multivariate normal approximation to the posterior that serves as a good first approximation in the development of more exact methods. We then provide **_a general introduction to the use of simulation in computing summaries of the posterior distribution_**. When one can directly simulate samples from the posterior distribution, then the Monte Carlo algorithm gives an estimate and associated standard error for the posterior mean for any function of the parameters of interest. In the situation where **_the posterior distribution is not a standard functional form, rejection sampling with a suitable choice of proposal density provides an alternative method for producing draws from the posterior_**. **_Importance sampling and sampling importance resampling (SIR) algorithms are alternative general methods for computing integrals and simulating from a general posterior distribution_**. The SIR algorithm is especially useful when one wishes to investigate the sensitivity of a posterior distribution with respect to changes in the prior and likelihood functions.
+
+\
+\
+\
+
+## Computing integrals
+
+\
+
+The Bayesian recipe for inference is conceptually simple. If we observe data $y$ from a sampling density $f(y|\theta)$, where $\theta$ is a vector of parameters and one assigns $\theta$ a prior $g(\theta)$, then the posterior density of $\theta$ is proportional to
+
+\
+
+$$g(\theta|y) \propto g(\theta)f(y|\theta).$$
+
+\
+
+The computational problem is to summarize this multivariate probability distribution to perform inference about functions of $\theta$.
+
+\
+
+Many of the posterior summaries are expressible in terms of integrals. Suppose we are interested in the posterior mean of a function $h(\theta)$. This mean is expressible as a ratio of integrals,
+
+\
+
+$$E(h(\theta)|y) = \frac{\int h(\theta)g(\theta)f(y|\theta)d\theta}{\int g(\theta)f(y|\theta)d\theta}.$$
+
+\
+
+If we are intersted in the posterior probability that $h(\theta)$ falls in a set A, we wish to compute
+
+\
+
+$$P(h(\theta) \in A|y) = \frac{\int _{h(\theta) \in A} g(\theta)f(y|\theta)d\theta}{\int g(\theta)f(y|\theta)d\theta}.$$
+
+\
+
+Integrals are also involved when we are interested in obtaining **_marginal densities of parameters of interest_**. Suppose we have the parameter $\theta = (\theta_{1},\theta_{2})$, where $\theta_{1}$ are the **_parameters of interest_** and $\theta_{2}$ are so-called **_nuisance parameters_**. One obtains the marginal posterior density of $\theta_{1}$ by integrating out the nuisance parameters from the joint posterior:
+
+\
+
+$$g(\theta_{1}|y) \propto \int g(\theta_{1}, \theta_{2}|y)d\theta_{2}.$$
+
+\
+
+In the common situation where one needs to evaluate these integrals numerically, there are a number of quadrature methods available. However, these quadrature methods have limited use for Bayesian integration problems. First, the choice of quadrature method depends on the location and shape of the posterior distribution. Second, for a typical quadrature method, the number of evaluations of the posterior density grows exponentially as a function of the number of components of $\theta$. In this chapter, we focus on the use of computational methods for computing integrals that are applicable to high-dimensional Bayesian problems.
+
+\
+\
+\
+\
+\
+\
+\
+
+## Setting up a problem in R
+
+\
+
+
+Before we describe some general summarization methods, we first describe setting up a Bayesian problem in R. Suppose one is able to write an explicit expression for the joint posterior density. In writing this expression, **_it is NOT necessary to include any normalizing constants that don’t involve the parameters_**. Next, for the algorithms described in this book, **_it is helpful to reparameterize all parameters so that they are all real-valued_**. If one has a positive parameter such as a variance, then transform using a log function. If one has a proportion parameter $p$, then it can be transformed to the real line by the logit function $logit(p) = log(p/(1 − p))$.
+
+\
+
+After the posterior density has been expressed in terms of transformed parameters, the first step in summarizing this density is to write an R function defining the logarithm of the joint posterior density.
+
+\
+\
+
+The general structure of this R function is
+
+```
+mylogposterior = function(theta, data){
+  [statements that compute the log density]
+  return(val)
+}
+```
+
+\
+\
+
+To apply the functions described in this chapter, theta is assumed to be a vector with $k$ components; that is, $\theta = (\theta_{1}, \cdots, \theta_{k})$. The input data is a vector of observed values or a list of data values and other model specifications such as the values of prior hyperparameters. The function returns a single value of the log posterior density.
+
+\
+
+One common situation is where one observes a random sample $y_{1}, \cdots, y_{n}$ from a sampling density $f(y|\theta)$ and one assigns $\theta$ the prior density $g(\theta)$. The logarithm of the posterior density of $\theta$ is given, up to an additive constant, by
+
+\
+
+$$log \, g(\theta|y) = log \, g(\theta) + \sum_{i=1}^{n}logf(y_{i}|\theta).$$
+
+\
+
+Suppose we are sampling from a normal distribution with mean $\mu$ and standard deviation $\sigma$, the parameter vector $\theta = (\mu,log \, \sigma)$, and we place an $N(10,20)$ prior on $\mu$ and a flat prior on $log \, \sigma$. The log posterior would have the form
+
+$$log \, g(\theta|y) = log \, \phi(\mu; 10, 20) + \sum_{i=1}^{n}log \, \phi(y_{i}; \mu, \sigma),$$
+
+\
+
+where $\phi(y; \mu, \sigma)$ is the normal density with mean $\mu$ and standard deviation $\sigma$. 
+
+\
+\
+
+To program this function, we first write the simple function that evaluates the log likelihood of $(\mu, \sigma)$ for a component of $y$:
+
+```
+logf = function(y, mu, sigma){
+  dnorm(y, mean=mu, sd=sigma, log=T)
+}
+```
+
+\
+\
+
+Note that we use the _log = T_ option in dnorm() to compute the logarithm of the density. Then, if data represents the vector of observations $y_{1}, \cdots, y_{n}$, one can evaluate the sum of log likelihood terms $\sum_{i=1}^{n} log \, \phi(y_{i}; \mu, \sigma)$ using the _sum_ command:
+
+```
+sum(logf(data, mu, sigma))
+```
+
+\
+\
+
+The function mylogposterior() defining the log posterior would in this case be written as follows.
+
+```
+mylogposterior = function(theta, data)
+{
+   n = length(data)
+   mu = theta[1]
+   sigma=exp(theta[2])
+   logf = function(y, mu, sigma){
+     dnorm(y, mean=mu, sd=sigma, log=T)
+   }
+   val = dnorm(mu, mean=10, sd=20, log=T)+sum(logf(data, mu, sigma))
+   return(val)
+}
+```
+
+\
+\
+\
+\
+\
+\
+\
+
+## A beta-binomial model for overdispersion
+
+\
+
+Tsutakawa et al. (1985) describe the problem of simultaneously estimating the rates of death from stomach cancer for males at risk in the age bracket 45–64 for the largest cities in Missouri. Table 5.1 displays the mortality rates for 20 of these cities, where a cell contains the number $n_{j}$ at risk and the number of cancer deaths $y_{j}$ for a given city.
+
+\
+
+![](/Users/jaeyonglee/Documents/College/RStudio/BCR/image/ss6.png)
+
+\
+
+A first modeling attempt might assume that the {$y_{j}$} represent independent binomial samples with sample sizes {$n_{j}$} and common probability of death $p$. But it can be shown that these data are overdispersed in the sense that the counts {$y_{j}$} display more variation than would be predicted under a binomial model with a constant probability $p$. A better-fitting model assumes that $y_{j}$ is distributed from a beta-binomial model with mean $\eta$ and precision $K$:
+
+\
+
+$$f(y_{j}|\eta, K) = \binom{n_{j}}{y_{j}} \frac{B(K\eta+y_{j}, K(1-\eta) + n_{j} - y_{j})}{B(K_{\eta}, K(1-\eta))}.$$
+
+\
+
+Suppose we assign the parameters the vague prior proportional to
+
+\
+
+$$g(\eta, K) \propto \frac{1}{\eta(1-\eta)}\frac{1}{(1+K)^2}.$$
+
+\
+
+Then the posterior density of $(\eta, K)$ is given, up to a proportionality constant, by
+
+\
+
+$$g(\eta, K|data) \propto \frac{1}{\eta(1-\eta)}\frac{1}{(1+K)^2}\prod_{j=1}^{20}\frac{B(K\eta+y_{j}, K(1-\eta)+n_{j}-y_{j})}{B(K_{\eta}, K(1-\eta))},$$
+
+\
+
+where $0 < \eta < 1$ and $K > 0$.
+
+\
+\
+
+We write a short function betabinexch0() to compute the logarithm of the posterior density. The inputs to the function are _theta_, a vector containing the values of $\eta$ and $K$, and _data_, a matrix having as columns the vector of counts {$y_{j}$} and the vector of sample sizes {$n_{j}$}.
+
+```{r}
+betabinexch0 = function(theta, data){
+   eta = theta[1]
+   K = theta[2]
+   y = data[, 1]
+   n = data[, 2]
+   N = length(y)
+   logf = function(y, n, K, eta){
+      lbeta(K * eta + y, K * (1 - eta) + n - y) - lbeta(K * eta, K * (1 - eta))
+      }
+   val = sum(logf(y, n, K, eta))
+   val = val - 2 * log(1 + K) - log(eta) - log(1 - eta) 
+   return(val)
+}
+```
+
+\
+\
+
+We read in the dataset _cancermortality_ from the _LearnBayes_ package and use the function mycontour() together with the log density function betabinexch0() to display a contour plot of the posterior density of $(\eta,K)$.
+
+```{r}
+library(LearnBayes)  # for cancermortality dataset
+data(cancermortality)
+cancermortality
+```
+
+```{r}
+library(latex2exp)  # for TeX()
+library(LearnBayes)  # for mycontour()
+mycontour(betabinexch0, c(0.0001, 0.003, 1, 20000), cancermortality, xlab="eta\n",ylab="K", sub=TeX("Contour plot of parameters $\\eta$ and $K$"))
+```
+
+Note the strong skewness in the density, especially toward large values of the precision parameter K. This right-skewness is a common characteristic of the likelihood function of a precision or variance parameter.
+
+\
+\
+
+Following the general guidance in "_Setting up a problem in R_" section, suppose we transform each parameter to the real line by using the reexpressions
+
+\
+
+$$\theta_{1} = logit(\eta) = log(\frac{\eta}{1-\eta}), \ \theta_{2} = log(K).$$
+
+\
+
+The posterior density of $(\theta_{1}, \theta_{2})$ is given by
+
+\
+
+$$g_{1}(\theta_{1}, \theta_{2}|data) = g(\frac{e^{\theta_{1}}}{1+e^{\theta_{1}}}, e^{\theta_{2}})\frac{e^{\theta_{1}+\theta_{2}}}{(1+e^{\theta_{1}})^{2}},$$
+
+\
+
+where the right term in the product is the Jacobian term in the transformation. 
+
+\
+\
+
+The log posterior density of the transformed parameters is programmed in the function betabinexch(). Note the change in the next-to-last line of the function that accounts for the logarithm of the Jacobian term.
+
+
+```{r}
+betabinexch=function (theta, data){
+   eta = exp(theta[1])/(1 + exp(theta[1]))
+   K = exp(theta[2])
+   y = data[, 1]
+   n = data[, 2]
+   N = length(y)
+   logf = function(y, n, K, eta){
+      lbeta(K * eta + y, K * (1 - eta) + n - y) - lbeta(K * eta, K * (1 - eta))
+   }
+   val = sum(logf(y, n, K, eta))
+   val = val + theta[2] - 2 * log(1 + exp(theta[2]))
+   return(val)
+}
+```
+
+\
+\
+
+Let's plot a contour plot of the posterior of $(\theta_{1},\theta_{2})$ using the mycontour() function.
+
+```{r}
+library(latex2exp)  # for TeX()
+library(LearnBayes)  # for mycontour()
+
+mycontour(betabinexch, c(-8,-4.5,3,16.5), cancermortality, xlab=TeX("$logit(\\eta)"),ylab=TeX("$log(K)$"), sub=TeX("Contour plot of transformed parameters $logit(\\eta)$ and $log(K)$"))
+```
+
+Although the density has an unusual shape, the strong skewness has been reduced and the distribution is more amenable to the computational methods described in this and the following chapters.
+
+\
+\
+\
+\
+\
+\
+\
+
+## Approximations based on posterior modes
+
+\
+
+One method of summarizing a multivariate posterior distribution is based on the behavior of the density about its mode. Let $\theta$ be a vector-valued parameter with prior density $g(\theta)$. If we observe data $y$ with sampling density $f(y|\theta)$, then consider the logarithm of the joint density of $\theta$ and $y$,
+
+\
+
+$$h(\theta,y) = log(g(\theta)f(y|\theta)).$$
+
+\
+
+In the following, we write this log density as $h(\theta)$ since after the data are observed $\theta$ is the only random quantity. Denoting the posterior mode of $\theta$ by $\hat{\theta}$, we expand the log density in a second-order Taylor series about $\hat{\theta}$. This gives the approximation
+
+\
+
+$$h(\theta) \approx h(\hat{\theta}) + (\theta - \hat{\theta})'h''(\hat{\theta})(\theta-\hat{\theta})/2,$$
+
+\
+
+where ${h}''(\hat{\theta})$ is the Hessian of the log density evaluated at the mode. Using this expansion, the posterior density is approximated by a multivariate normal density with mean $\hat{\theta}$ and variance-covariance matrix
+
+\
+
+$$V = (-h''(\hat{\theta}))^{-1}.$$
+
+\
+
+In addition, this approximation allows one to analytically integrate out $\theta$ from the joint density and obtain the following approximation to the prior predictive density,
+
+\
+
+$$f(y) \approx (2\pi)^{d/2}g(\hat{\theta})f(y|\hat{\theta})\left | -h''(\hat{\theta}) \right |^{1/2},$$
+
+\
+
+where $d$ is the dimension of $\theta$.
+
+\
+
+To apply this approximation, one needs to find the mode of the posterior density of $\theta$. One general-purpose optimization algorithm for finding this mode is provided by **_Newton’s method_**. Suppose one has a guess at the posterior mode $\theta^{0}$. If $\theta^{t-1}$ is the estimate at the mode at the $t − 1$ iteration of the algorithm, then the next iterate is given by
+
+\
+
+$$\theta^{t} = \theta^{t-1} - [h''(\theta^{t-1})]^{-1}h'(\theta^{t-1}),$$
+
+\
+
+where $h′(\theta^{t−1})$ and $h′′(\theta^{t−1})$ are the gradient and Hessian of the log density evaluated at the current guess at the mode. One continues these iterations until convergence. There are many alternative algorithms available for finding the posterior mode. In the following, we will use the **_Nelder-Mead algorithm_**, which is the default method in the R function optim() in the R base package. This algorithm is an iterative method based on the evaluation of the objective function over vertices of a simplex (a triangle for two variables). For the examples described in this book, the **_Nelder-Mead algorithm appears to be preferable to Newton’s method since it is less sensitive to the choice of starting value_**.
+
+\
+
+After one writes an R function to evaluate the log posterior density, the R function laplace() in the _LearnBayes_ package finds the joint posterior mode by using optim() and the default Nelder-Mead algorithm. The inputs to laplace() are the function defining the joint posterior, an intelligent guess at the posterior mode, and data and parameters used in the definition of the log posterior. The choice of “intelligent guess” can be important since the algorithm may fail to converge with a poor choice of starting value. Suppose that a suitable starting value is used and laplace() is successful in finding the posterior mode. The output of laplace() is a list with four components. The component _mode_ gives the value of the posterior mode $\hat{\theta}$, the component _var_ is the associated variance-covariance matrix $V$, the component _int_ is the approximation to the logarithm of the prior predictive density, and _converge_ indicates if the algorithm converged.
+
+\
+\
+\
+\
+\
+\
+\
+
+## The example
+
+\
+
+We illustrate the use of the function laplace() for our beta-binomial modeling example. Based on our contour plot, we start the Nelder-Mead method with the initial guess $(logit(\eta), log(K)) = (−7, 6)$.
+
+```{r}
+fit = laplace(betabinexch, c(-7,6), cancermortality)
+fit
+```
+
+We find the posterior mode to be (−6.82, 7.58). From the output of laplace(), we have the approximation that $(logit(\eta),log(K))$ is approximately bivariate normal with mean vector _mode_ and variance-covariance matrix _var_. 
+
+\
+\
+
+Using the mycontour() function with the log bivariate normal function lbinorm(), we can display the contours of the approximate normal density.
+
+```{r}
+library(latex2exp)  # for TeX()
+library(LearnBayes)  # for mycontour(), lbinorm()
+
+npar=list(m=fit$mode,v=fit$var)
+mycontour(lbinorm, c(-8,-4.5,3,16.5), npar, xlab=TeX("$logit(\\eta)$"), ylab="log(K)", sub=TeX("Contour plot of normal approximation of $logit(\\eta)$ and log(K)"))
+```
+
+Comparing this to the contour plot of transformed parameters we saw previously, we see significant differences between the exact and approximate normal posteriors.
+
+\
+\
+
+One advantage of this algorithm is that one obtains quick summaries of the parameters by using the multivariate normal approximation. By using the diagonal elements of the variance-covariance matrix, one can construct approximate probability intervals for $logit(\eta)$ and $log(K)$. 
+
+\
+
+For example, the following code constructs 90% probability intervals for the parameters:
+
+```{r}
+se = sqrt(diag(fit$var))
+fit$mode - 1.645*se; fit$mode + 1.645*se
+```
+
+A 90% interval estimate for $logit(\eta)$ is (−7.28,−6.36), and a 90% interval estimate for $log(K)$ is (5.67, 9.49).
+
+\
+\
+\
+\
+\
+\
+\
+
+## Monte Carlo method for computing integrals
+
+\
+
+A second general approach for summarizing a posterior distribution is based on simulation. Suppose that $\theta$ has a posterior density $g(\theta|y)$ and we are interested in learning about a particular function of the parameters $h(\theta)$. The posterior mean of $h(\theta)$ is given by
+
+\
+
+$$E(h(\theta)|y) = \int h(\theta)g(\theta|y)d\theta.$$
+
+\
+
+Suppose we are able to simulate an independent sample $\theta^{1}, \cdots,\theta^{m}$ from the posterior density. Then the Monte Carlo estimate at the posterior mean is given by the sample mean
+
+\
+
+$$\bar{h} = \frac{\sum_{j=1}^{m}h(\theta^{j})}{m}.$$
+
+\
+
+The associated simulation standard error of this estimate is estimated by
+
+\
+
+$$se_{\bar{h}} = \sqrt{\frac{\sum_{j=1}^{m}(h(\theta^{j})-\bar{h})^{2}}{(m-1)m}}.$$
+
+\
+
+The Monte Carlo approach is an effective method for summarizing a posterior distribution when simulated samples are available from the exact posterior distribution. 
+
+\
+\
+
+For a simple illustration of the Monte Carlo method, return to chapter 2, where we were interested in the proportion of heavy sleepers $p$ at a college. With the use of a beta prior, the posterior distribution for $p$ was $beta(14.26, 23.19)$. 
+
+\
+
+Suppose we are interested in the posterior mean of $p^{2}$. (This is the predictive probability that two students in a future sample will be heavy sleepers.) We simulate 1000 draws from the beta posterior distribution. If {$p_{j}$} represent the simulated sample, the Monte Carlo estimate at this posterior mean will be the mean of the {$(p_{j})^{2}$}, and the simulated standard error is the standard deviation of the {$(p_{j})^{2}$} divided by the square root of the simulation sample size.
+
+```{r}
+p=rbeta(1000, 14.26, 23.19)
+est=mean(p^2)
+se=sd(p^2)/sqrt(1000)
+c(est,se)
+```
+
+The Monte Carlo estimate at $E(p^{2}|data)$ is 0.151, with an associated simulation standard error of 0.002.
+
+\
+\
+\
+\
+\
+\
+\
+
+## Rejection sampling
+
+\
+
+In the examples of Chapters 2, 3, and 4, we were able to produce simulated samples directly from the posterior distribution since the distributions were familiar functional forms. Then we would be able to obtain Monte Carlo estimates of the posterior mean for any function of the parameters of interest. But in many situations, such as the beta-binomial example of this chapter, the posterior does not have a familiar form and we need to use an alternative algorithm for producing a simulated sample.
+
+\
+
+A general-purpose algorithm for simulating random draws from a given probability distribution is rejection sampling. In this setting, suppose we wish to produce an independent sample from a posterior density $g(\theta|y)$ where the normalizing constant may not be known. The first step in rejection sampling is to find another probability density $p(\theta)$ such that:
+
+- It is easy to simulate draws from $p$.
+- The density $p$ resembles the posterior density of interest $g$ in terms of
+location and spread.
+- For all $\theta$ and a constant $c$, $g(\theta|y) \leq c \cdot p(\theta)$.
+
+\
+
+Suppose we are able to find a density $p$ with these properties. Then one obtains draws from $g$ using the following **_accept/reject algorithm_**:
+
+1. Independently simulate $\theta$ from $p$ and a uniform random variable $U$ on the unit interval.
+2. If $U \leq g(\theta|y)/(c \cdot p(\theta))$, then accept $\theta$ as a draw from the density $g$; otherwise reject $\theta$.
+3. Continue steps 1 and 2 of the algorithm until one has collected a sufficient number of “accepted” $\theta$.
+
+\
+
+Rejection sampling is one of the most useful methods for simulating draws from a variety of distributions, and standard methods for simulating from standard probability distributions such as normal, gamma, and beta are typically based on rejection algorithms. The main task in designing a rejection sampling algorithm is finding a suitable proposal density $p$ and constant value $c$. At step 2 of the algorithm, the probability of accepting a candidate draw is given by $g(\theta|y)/(c \cdot p(\theta))$. **_One can monitor the algorithm by computing the proportion of draws of $p$ that are accepted; an efficient rejection sampling algorithm has a high acceptance rate_**.
+
+\
+\
+
+We consider the use of rejection sampling to simulate draws of $\theta =(logit(\eta), log(K))$ in the beta-binomial example. We wish to find a proposal density of a simple functional form that, when multiplied by an appropriate constant, covers the posterior density of interest. One choice for $p$ would be a bivariate normal density with mean and variance given as outputs of the function laplace(). Although this density does resemble the posterior density, the normal density has relatively sharp tails and the ratio $g(\theta|y)/p(\theta)$ likely would not be bounded. A better choice for a covering density is a multivariate $t$ with mean and scale matrix chosen to match the posterior density and a small number of degrees of freedom. The small number of degrees of freedom gives the density heavy tails and one is more likely to find bounds for the ratio $g(\theta|y)/p(\theta)$.
+
+\
+
+In our earlier work, we found approximations to the posterior mean and variance-covariance matrix of $\theta =(logit(\eta),log(K))$ based on the Laplace method. If the output variable of laplace is fit, then _mode_ is the posterior mode and _var_ the associated variance-covariance matrix. Suppose we decide to use a multivariate $t$ density with location _mode_, scale matrix 2 _var_, and 4 degrees of freedom. These choices are made to mimic the posterior density and ensure that the ratio $g(\theta|y)/p(\theta))$ is bounded from above.
+
+\
+
+To set up the rejection algorithm, we need to find the value of the bounding constant. We want to find the constant $c$ such that
+
+\
+
+$$g(\theta|y) \leq c \cdot p(\theta) \quad \mathrm{for \ all} \ \theta.$$
+
+\
+
+Equivalently, since $g$ is programmed on the log scale, we want to find the constant $d=log(c)$ such that
+
+\
+
+$$log \, g(\theta|y) - log \, p(\theta) \leq d \quad \mathrm{for \ all} \ \theta.$$
+
+\
+\
+
+Basically we wish to maximize the function $log \, g(\theta|y) − log \, p(\theta)$ over all \theta. A convenient way to perform this maximization is by using the laplace() function. We write a new function betabinT() that computes values of this difference function. There are two inputs, the parameter _theta_ and a list _datapar_ with components _data_, the data matrix, and _par_, a list with the parameters of the $t$ proposal density (mean, scale matrix, and degrees of freedom).
+
+```{r}
+betabinT=function(theta,datapar){
+   data = datapar$data
+   tpar = datapar$par
+   d = betabinexch(theta, data) - dmt(theta, mean=c(tpar$m), S=tpar$var, df=tpar$df, log=TRUE)
+   return(d)
+   }
+```
+
+\
+\
+
+For our problem, we define the parameters of the $t$ proposal density and the list _datapar_:
+
+```{r}
+tpar = list(m=fit$mode, var=2*fit$var, df=4)
+datapar = list(data=cancermortality, par=tpar)
+```
+
+\
+\
+
+We run the function laplace() with this new function and using an "intelligent" starting value.
+
+```{r}
+start = c(-6.9,12.4)
+fit1 = laplace(betabinT, start, datapar)
+fit1$mode
+```
+
+We find that the maximum value $d$ occurs at the value $\theta = (−6.889, 12.422)$. We note that this $\theta$ value is not at the extreme portion of the space of simulated draws, which indicates that we indeed have found an approximate maximum. 
+
+\
+\
+
+The value of $d$ is found by evaluating the function at the modal value.
+
+```{r}
+betabinT(fit1$mode, datapar)
+```
+
+\
+\
+
+We implement rejection sampling using the function rejectsampling(). The inputs are the function logf() defining the log posterior, the parameters of the $t$ covering density _tpar_, the maximum value of $d$ denoted by _dmax_, the number of candidate values simulated $n$, and the data for the log posterior function _data_. In this function, we simulate a vector of $\theta$ from the proposal density, compute the values of $log(g)$ and $log(f)$ on these simulated draws, compute the acceptance probabilities, and return only the simulated values of $\theta$ where the uniform draws are smaller than the acceptance probabilities. In the function rejectsampling(), these four steps are accomplished by the commands
+
+```
+theta=rmt(n,mean=c(tpar$m),S=tpar$var,df=tpar$df)
+lf=logf(theta,data)
+lg=dmt(theta,mean=c(tpar$m),S=tpar$var,df=tpar$df,log=TRUE)
+prob=exp(lf-lg-dmax)
+theta[runif(n)<prob,]
+```
+
+\
+\
+
+We run the function rejectsampling() using the constant value of $d$ found earlier and simulate 10,000 draws from the proposal density. 
+
+```{r}
+theta=rejectsampling(betabinexch, tpar,- 569.2813, 10000, cancermortality)
+dim(theta)
+```
+
+We see that the output value theta has only 2406 rows, so the acceptance rate of this algorithm is 2406/10,000 = .24. This is a relatively inefficient algorithm since it has a small acceptance rate, but the proposal density was found without too much effort.
+
+\
+\
+
+We plot the simulated draws from rejection sampling on the contour plot of the log posterior density. 
+
+```{r}
+library(latex2exp)  # for TeX()
+library(LearnBayes)  # for mycontour()
+mycontour(betabinexch,c(-8,-4.5,3,16.5),cancermortality, xlab=TeX("$logit(\\eta)$"),ylab="log(K)",sub=TeX("Contour plot of $logit(\\eta)$ and log(K) with simulated draws from the rejection algorithm"))
+points(theta[,1],theta[,2])
+```
+
+As expected, most of the draws fall within the inner contour of the exact density.
+
+\
+\
+\
+\
+\
+\
+\
+
+## Importance sampling
+
+\
+\
+
+### Introduction
+
+\
+
+Let us return to the basic problem of computing an integral in Bayesian inference. In many situations, the normalizing constant of the posterior density $g(\theta|y)$ will be unknown, so the posterior mean of the function $h(\theta)$ will be given by the ratio of integrals
+
+\
+
+$$E(h(\theta)|y) = \frac{\int h(\theta)g(\theta)f(y|\theta)d\theta}{\int g(\theta)f(y|\theta)d\theta},$$
+
+\
+
+where $g(\theta)$ is the prior and $f(y|\theta)$ is the likelihood function.
+
+\
+
+If we were able to simulate a sample {$\theta_{j}$} directly from the posterior density $g$, then we could approximate this expectation by a Monte Carlo estimate. In the case where we are not able to generate a sample directly from $g$, suppose instead that we can construct a probability density $p$ that we can simulate and that approximates the posterior density $g$. We rewrite the posterior mean as
+
+\
+
+$$
+\begin{align}
+E(h(\theta)|y) & = \frac{\int h(\theta)\frac{g(\theta)f(y|\theta)}{p(\theta)}p(\theta)d\theta}{\int \frac{g(\theta)f(y|\theta)}{p(\theta)}p(\theta)d\theta} \\
+& = \frac{\int h(\theta)w(\theta)p(\theta)d\theta}{w(\theta)p(\theta)d\theta}
+\end{align}
+$$
+
+\
+
+where $w(\theta) = g(\theta)f(y|\theta)/p(\theta)$ is the weight function.
+
+\
+
+If $\theta^{1}, \cdots, \theta^{m}$ are a simulated sample from the approximation density $p$, then the importance sampling estimate of the posterior mean is
+
+\
+
+$$\bar{h}_{IS} = \frac{\sum_{j=1}^{m}h(\theta^{j})w(\theta^{j})}{\sum_{j=1}^{m}w(\theta^{j})}.$$
+\
+
+This is called an **_importance sampling estimate because we are sampling values of $\theta$ that are important in computing the integrals in the numerator and denominator_**. The simulation standard error of an importance sampling estimate is estimated by
+
+\
+
+$$se_{\bar{h}_{IS}} = \frac{\sqrt{\sum_{j=1}^{m}((h(\theta^{j})-\bar{h}_{IS})w(\theta^{j}))^{2}}}{\sum_{j=1}^{m}w(\theta^{j})}.$$
+
+\
+
+As in rejection sampling, the main issue in designing a good importance sampling estimate is **_finding a suitable sampling density $p$_**. This density should be of a familiar functional form so simulated draws are available. The density should mimic the posterior density $g$ and have relatively flat tails so that the weight function $w(\theta)$ is bounded from above. **_One can monitor the choice of $p$ by inspecting the values of the simulated weights $w(\theta^{j})$. If there are no unusually large weights, then it is likely that the weight function is bounded and the importance sampler is providing a suitable estimate_**.
+
+\
+
+To illustrate the use of different proposal densities in importance sampling in our example, consider the problem of estimating the posterior mean of a function of $\theta_{2} = log(K)$ conditional on a value of $\theta_{1} =logit(\eta)$. The posterior density of $\theta_{2}$, conditional on $\theta_{1}$ is given by
+
+\
+
+$$g_{1}(\theta_{2}|data,\theta_{1}) \propto \frac{K}{(1+K)^2}\prod_{j=1}^{20}\frac{B(K \cdot \eta+y_{j}, K \cdot (1-\eta)+n_{j}-y_{j})}{B(K \cdot \eta, K \cdot (1-\eta))},$$
+
+\
+
+where $\eta = exp(\theta_{1})/(1 + exp(\theta_{1}))$ and $K = exp(\theta_{2})$.
+
+\
+\
+
+In the following, we write the function betabinexch.cond() to compute this posterior density conditional on the value $\theta_{1} = −6.818793$. This function is written to allow the input of a vector of values of $\theta_{2} = log(K)$. Also, unlike the other functions in this chapter, the function betabinexch.cond() returns the value of the density rather than the value of the log density.
+
+```{r}
+betabinexch.cond = function(log.K, data){
+   eta = exp(-6.818793)/(1 + exp(-6.818793))
+   K = exp(log.K)
+   y = data[, 1]; n = data[, 2]
+   N = length(y)
+   logf=0*log.K
+   for (j in 1:length(y)){
+      logf = logf + lbeta(K * eta + y[j], K * (1 - eta) + n[j] - y[j]) - lbeta(K * eta, K * (1 - eta))
+      }
+   val = logf + log.K - 2 * log(1 + K)
+   return(exp(val-max(val)))
+   }
+```
+
+\
+\
+
+To compute the mean of $log(K)$ for the cancer mortality data, suppose we let the proposal density $p$ be normal with mean 8 and standard deviation 2. In the R code below, we use the integrate function to find the normalizing constant of the posterior density of $log(K)$. Then, using the curve function, we display the conditional posterior density of $log(K)$ and the normal proposal density. We also graph the weight function, the ratio of the posterior density to the proposal density.
+
+```{r}
+I=integrate(betabinexch.cond,2,16,cancermortality)
+par(mfrow=c(2,1))
+curve(betabinexch.cond(x,cancermortality)/I$value,from=3,to=16, ylab="Density", xlab="log K",lwd=3, main="Densities")
+curve(dnorm(x,8,2),add=TRUE)
+legend("topright",legend=c("Exact","Normal"),lwd=c(3,1))
+curve(betabinexch.cond(x,cancermortality)/I$value/dnorm(x,8,2),from=3,to=16, ylab="Weight",xlab="log K", main="Weight = g/p")
+```
+
+Although the normal proposal density resembles the posterior density with respect to location and spread, the posterior density has a flatter right tail than the proposal and the weight function is unbounded for large $log(K)$.
+
+\
+\
+\
+\
+
+### Using a multivariate _t_ as a proposal density
+
+\
+
+For a posterior density of a vector of real-valued parameters, a convenient choice of sampler $p$ is a multivariate $t$ density. The R function impsampling() will implement importance sampling for an arbitrary posterior density when $p$ is a $t$ density. There are five inputs to this function: _logf_ is the function defining the logarithm of the posterior, _tpar_ is a list of parameter values of the $t$ density, _h_ is a function defining the function $h(\theta)$ of interest, $n$ is the size of the simulated sample, and _data_ is the vector or list used in the definition of _logf_. 
+
+\
+
+In the function impsampling(), the functions rmt() and dmt() from the _mnormt_ library are used to simulate and compute values of the $t$ density. In the following portion of R code from impsampling(), we simulate draws from the sampling density, compute values of the log sampling density and the log posterior density at the simulated draws, and compute the weights and importance sampler estimate.
+
+```
+theta = rmt(n, mean = c(tpar$m), S = tpar$var, df = tpar$df) 
+lf = matrix(0, c(dim(theta)[1], 1))
+lp = dmt(theta, mean = c(tpar$m), S = tpar$var, df = tpar$df, log = TRUE)
+md = max(lf - lp)
+wt = exp(lf - lp - md)
+est = sum(wt * H)/sum(wt)
+```
+
+\
+\
+
+Note that the value _md_ is the maximum value of the difference of logs of the posterior and proposal density -- this value is used in the computation of the weights to prevent possible overflow. The output of impsampling() is a list with four components: _est_ is the importance sampling estimate, _se_ is the corresponding simulation standard error, _theta_ is a matrix of simulated draws from the proposal density $p$, and _wt_ is a vector of the corresponding weights.
+
+\
+
+To illustrate importance sampling, let us return to our beta-binomial example and consider the problem of estimating the posterior mean of $log(K)$. For this example, the proposal density used in the development of a rejection algorithm seems to be a good choice for importance sampling. We choose a $t$ density where the location is the posterior mode (found from laplace()), the scale matrix is twice the estimated variance-covariance matrix, and the number of degrees of freedom is 4. This choice for $p$ will resemble the posterior density and have flat tails that we hope will result in bounded weights. We define a short function myfunc() to compute the function $h$. Since we are interested in the posterior mean of $log(K)$, we define the function to be the second component of the vector $\theta$. We are now ready to run impsampling().
+
+```{r}
+tpar=list(m=fit$mode,var=2*fit$var,df=4)
+myfunc=function(theta){
+   return(theta[2])
+}
+s=impsampling(betabinexch,tpar,myfunc,10000,cancermortality)
+cbind(s$est,s$se)
+```
+
+We see from the output that the importance sampling estimate of the mean of $log(K)$ is 7.917 with an associated standard error of 0.019. To check if the weight function is bounded, we could compute a histogram of the simulated weights and check if there are no extreme weights.
+
+\
+\
+\
+\
+\
+\
+\
+
+## Sampling importance resampling
+
+\
+
+In rejection sampling, we simulated draws from a proposal density $p$ and accepted a subset of these values to be distributed according to the posterior density of interest $g(\theta|y)$. There is an alternative method of obtaining a simulated sample from the posterior density $g$ motivated by the importance sampling algorithm.
+
+\
+
+As before, we simulate $m$ draws from the proposal density $p$ denoted by $\theta_{1}, \cdots, \theta_{m}$ and compute the weights {$w(\theta_{j}) = g(\theta_{j}|y)/p(\theta_{j})$}. Convert the weights to probabilities by using the formula
+
+\
+
+$$p^{j} = \frac{w(\theta^{j})}{\sum_{j=1}^{m}w(\theta^{j})}.$$
+
+\
+
+Suppose we take a new sample $\theta^{*1}, \cdots , \theta^{*m}$ from the discrete distribution over $\theta^{1}, \cdots , \theta^{m}$ with respective probabilities $p^{1}, \cdots , p^{m}$. Then the {$\theta^{∗j}$} will be approximately distributed according to the posterior distribution $g$. This method, called sampling importance resampling, or SIR for short, is a weighted bootstrap procedure where we sample with replacement from the sample {$\theta^{j}$} with unequal sampling probabilities.
+
+\
+
+This sampling algorithm is straightforward to implement in R using the sample() command. Suppose we wish to obtain a simulated sample of size $n$. As in importance sampling, we first simulate from the proposal density which in this situation is a multivariate $t$ distribution, and then compute the importance sampling weights stored in the vector _wt_.
+
+```
+theta = rmt(n, mean = c(tpar$m), S = tpar$var, df = tpar$df) 
+lf = logf(theta, data)
+lp = dmt(theta, mean = c(tpar$m), S = tpar$var, df = tpar$df, log = TRUE)
+md = max(lf - lp)
+wt = exp(lf - lp - md)
+```
+
+\
+\
+
+To implement the SIR algorithm, we first convert the weights to probabilities and store them in the vector probs. Next we use sample to take a sample with replacement from the indices $1, \cdots, n$, where the sampling probabilities are contained in the vector _probs_; the simulated indices are stored in the vector indices.
+
+```
+probs=wt/sum(wt)
+indices=sample(1:n,size=n,prob=probs,replace=TRUE)
+```
+
+\
+\
+
+Finally, we use the random indices in indices to select the rows of theta and assign them to the matrix _theta.s_. The matrix _theta.s_ contains the simulated draws from the posterior.
+
+```
+theta.s=theta[indices,]
+```
+
+\
+\
+
+The function sir() implements this algorithm for a multivariate $t$ proposal density. The inputs to this function are the function defining the log posterior _logf_, the list _tpar_ of parameters of the multivariate proposal density, the number $n$ of simulated draws, and the _data_ used in the log posterior function. The output is a matrix of simulated draws from the posterior. 
+
+\
+
+In the beta-binomial modeling example, we implement the SIR algorithm as the following.
+
+```{r}
+theta.s=sir(betabinexch,tpar,10000,cancermortality)
+```
+
+\
+\
+
+We have illustrated the use of the SIR algorithm in converting simulated draws from a proposal density to draws from the posterior density. But this algorithm can be used to convert simulated draws from one probability density to a second probability density. To show the power of this method, **_suppose we wish to perform a Bayesian sensitivity analysis with respect to the individual observations in the dataset. Suppose we focus on posterior inference about the log precision parameter $log(K)$ and question how the inference would change if we removed individual observations from the likelihood_**. Let $g(\theta|y)$ denote the posterior density from the full dataset and $g(\theta|y_{(−i)})$ denote the posterior density with the $i$th observation removed. Let {$\theta_{j}$} represent a simulated sample from the full dataset. We can obtain a simulated sample from $g(\theta|y_{(−i)})$ by resampling from {$\theta_{j}$}, where the sampling probabilities are proportional to the weights
+
+
+\
+
+$$
+\begin{align}
+w(\theta) &= \frac{g(\theta|y_{(-i)})}{g(\theta|y)} \\
+&= \frac{1}{f(y_{i}|\theta)} \\
+&= \frac{B(K \cdot \eta, K \cdot (1-\eta))}{B(K \cdot \eta +y_{i}, K \cdot (1-\eta) + n_{i} - y_{i})}.
+\end{align}
+$$
+
+\
+\
+
+Suppose that the inference of interest is a 90% probability interval for the log precision $log(K)$. The R code for this resampling for the “leave observation i out” follows. One first computes the sampling weights and the sampling probabilities. Then the sample command is used to do the resampling from _theta_ and the simulated draws from the “leave one out” posterior are stored in the variable _theta.s_. We summarize the simulated values of $log(K)$ by the 5th, 50th, and 95th quantiles.
+
+```
+weight=exp(lbeta(K*eta,K*(1-eta))-lbeta(K*eta+y[i],K*(1-eta)+n[i]-y[i]))
+probs=weight/sum(weight)
+indices=sample(1:m,size=m,prob=probs,replace=TRUE)
+theta.s=theta[indices,]
+summary.obs[i,]=quantile(theta.s[,2],c(.05,.5,.95))
+```
+
+\
+\
+
+
+The function bayes.influence() computes probability intervals for $log(K)$ for the complete dataset and “leave one out” datasets using the SIR algorithm. We assume one already has simulated a sample of values from the complete data posterior, and the draws are stored in the matrix variable _theta.s_. The inputs to bayes.influence() are _theta.s_ and the dataset _data_. 
+
+\
+
+In this case, suppose we have just implemented the SIR algorithm, and the posterior draws are stored in the matrix _theta.s_. Then the form of the function would be
+
+```{r}
+S=bayes.influence(theta.s,cancermortality)
+```
+
+The output of this function is a list _S_; _S_ has _summary_ which is a vector containing the 5th, 50th, and 95th percentiles, and _summary.obs_ which is a matrix where the $i$th row gives the percentiles for the posterior with the $i$th observation removed.
+
+\
+\
+
+The following is a graphical display of the sensitivity of the posterior inference about $log(K)$ with respect to the individual observations. 
+
+```{r}
+plot(c(0,0,0),S$summary,type="b",lwd=3,xlim=c(-1,21), ylim=c(5,11), xlab="Observation removed",ylab="log(K)") > for (i in 1:20) lines(c(i,i,i),S$summary.obs[i,],type="b")
+```
+
+The bold line shows the posterior median and 90% probability interval for the complete dataset, and the remaining lines show the inference with each possible observation removed. 
+
+\
+
+Note that if observation number 15 is removed $((y_{i}, n_{i}) = (54, 53637))$, then the location of $log(K)$ is shifted toward smaller values. Also, if either observation 10 or observation 19 is removed, $log(K)$ is shifted toward larger values. These two observations are notable since each city experienced three deaths and had relatively high mortality rates.
+
+\
+\
+\
+\
+\
+\
+\
+
+## Summary of R functions
+
+\
+
+**_bayes.influence()_** – computes probability intervals for the log precision parameter K in a beta-binomial model for all “leave one out” models using sampling importance resampling
+
+_Usage_: bayes.influence(theta,data)
+
+_Arguments_: theta, matrix of simulated draws from the posterior of (logit eta, log K) for a beta-binomial model; data, matrix with columns of counts and sample sizes
+
+_Value_: summary, vector of 5th, 50th and 95th percentiles of log K for the posterior of complete sample; summary.obs, matrix where the ith row contains the 5th, 50th and 95th percentiles of log K for the posterior when the ith observation is removed
+
+\
+
+**_betabinexch0()_** – computes the logarithm of the posterior for the parameters (mean and precision) in a beta-binomial model
+
+_Usage_: betabinexch0(theta,data)
+
+_Arguments_: theta, vector of parameter values (eta, K); data, matrix with columns of counts and sample sizes
+
+_Value_: value of the log posterior
+
+\
+
+**_betabinexch()_** – computes the logarithm of the posterior for the parameters (logit mean and log precision) in a beta-binomial model
+
+_Usage_: betabinexch(theta,data)
+
+_Arguments_: theta, vector of parameter values (logit eta, log K); data, matrix with columns of counts and sample sizes
+
+_Value_: value of the log posterior
+
+\
+
+**_impsampling()_** – implements importance sampling to compute the posterior mean of a function using a multivariate t proposal density,
+
+_Usage_: impsampling(logf,tpar,h,n,data)
+
+_Arguments_: logf, function defining the log density; tpar, list of parameters of a multivariate t proposal density including the mean m, the scale matrix var, and the degrees of freedom df; h, function that defines h(theta); n, number of simulated draws from the proposal density; data, data and or parameters used in the function logf
+
+_Value_: est, estimate at the posterior mean; se, simulation standard error of the estimate; theta, matrix of simulated draws from proposal density; wt, vector of importance sampling weights
+
+\
+
+**_laplace()_** – for a general posterior density, computes the posterior mode, the associated variance-covariance matrix, and an estimate of the logarithm of the normalizing constant
+
+_Usage_: laplace(logpost,mode,par)
+
+_Arguments_: logpost, function that defines the logarithm of the posterior density; mode, vector that is a guess at the posterior mode; par, vector or list of parameters associated with the function logpost
+
+_Value_: mode, current estimate of the posterior mode; var, current estimate of the associated variance-covariance matrix; int, estimate of the logarithm of the normalizing constant; converge, indication (TRUE or FALSE) if the algorithm converged
+
+\
+
+**_binorm()_** – computes the logarithm of a bivariate normal density
+
+_Usage_: lbinorm(xy,par)
+
+_Arguments_: xy, vector consisting of two variables x and y; par, list containing m, a vector of means, and v, a variance-covariance matrix
+
+_Value_: value of the kernel of the log density function
+
+\
+
+**_rejectsampling()_** – implements a rejection sampling algorithm for a probability density using a multivariate t proposal density
+
+_Usage_: rejectsampling(logf,tpar,dmax,n,data)
+
+_Arguments_: logf, function that defines the logarithm of the density of interest; tpar, list of parameters of a multivariate t proposal density, including the mean m, the scale matrix var, and the degrees of freedom df; dmax, logarithm of the rejection sampling constant; n, number of simulated draws from the proposal density; data, data and/or parameters used in the function logf 
+
+_Value_: matrix of simulated draws from density of interest
+
+\
+
+**_sir()_** – implements the sampling importance resampling algorithm for a multivariate t proposal density
+
+_Usage_: sir(logf,tpar,n,data)
+
+_Arguments_: logf, function defining logarithm of density of interest; tpar, list of parameters of a multivariate t proposal density including the mean m, the scale matrix var, and the degrees of freedom df; n, number of simulated draws from the posterior; data, data and parameters used in the function logf 
+
+_Value_: matrix of simulated draws from the posterior, where each row corresponds to a single draw
+
+\
+\
+\
+\
+\
+\
+\
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
