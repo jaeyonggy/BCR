@@ -1,0 +1,965 @@
+---
+title: "Bayesian Computation with R"
+output:
+  html_notebook:
+    toc: yes
+---
+
+<style type="text/css">
+
+body, td {
+   font-size: 17px;  # body, td, is for normal text
+}
+code.r{
+  font-size: 12px;  # code.r is for r code
+}
+pre {
+  font-size: 10px  # pre is for output of knitr chunks
+}
+</style>
+
+\
+\
+
+This notebook was made with 'Bayesian Computation with R' by Jim Albert as reference. This notebook is for personal use only.
+
+\
+\
+\
+
+# Ch.6 Markov Chain Monte Carlo methods
+
+\
+
+In Chapter 5, we introduced the use of simulation in Bayesian inference. Rejection sampling is a general method for simulating from an arbitrary posterior distribution, but it can be difficult to set up since it requires the construction of a suitable proposal density. Importance sampling and SIR algorithms are also general-purpose algorithms, but they also require proposal densities that may be difficult to find for high-dimensional problems. In this chapter, we illustrate the use of Markov chain Monte Carlo (MCMC) algorithms in summarizing posterior distributions. Markov chains are introduced in the discrete state space situation in Section 6.2. Through a simple random walk example, we illustrate some of the important properties of a special Markov chain, and we use R to simulate from the chain and move toward the sta- tionary distribution. In Section 6.3, we describe two variants of the popular Metropolis-Hastings algorithms in setting up Markov chains, and in Section 6.4 we describe Gibbs sampling, where the Markov chain is set up through the conditional distributions of the posterior. We describe one strategy for sum- marizing a posterior distribution and illustrate it for three problems. MCMC algorithms are very attractive in that they are easy to set up and program and require relatively little prior input from the user. R is a convenient language for programming these algorithms and is also very suitable for performing out- put analysis, where one does several graphical and numerical computations to check if the algorithm is indeed producing draws from the target posterior distribution.
+
+\
+\
+\
+
+## 6.2 Introduction to discret Markov chains
+
+\
+
+Suppose a person takes a random walk on a number line on the values 1, 2, 3, 4, 5, 6. If the person is currently at an interior value (2, 3, 4, or 5), in the next second she is equally likely to remain at that number or move to an adjacent number. If she does move, she is equally likely to move left or right. If the person is currently at one of the end values (1 or 6), in the next second she is equally likely to stay still or move to the adjacent location.
+
+\
+
+This is a simple example of a discrete Markov chain. A Markov chain describes probabilistic movement between a number of states. Here there are six possible states, 1 through 6, corresponding to the possible locations of the walker. Given that the person is at a current location, she moves to other locations with specified probabilities. The probability that she moves to another location depends only on her current location and not on previous locations visited. We describe movement between states in terms of transition probabilities – they describe the likelihoods of moving between all possible states in a single step in a Markov chain. We summarize the transition probabilities by means of a transition matrix $P$:
+
+\
+
+$$
+P = \begin{bmatrix}
+0.50 & 0.50 & 0 & 0 & 0 & 0 \\ 
+0.25 & 0.50 & 0.25 & 0 & 0 & 0 \\ 
+0 & 0.25 & 0.50 & 0.25 & 0 & 0 \\ 
+0 & 0 & 0.25 & 0.50 & 0.25 & 0 \\ 
+0 & 0 & 0  & 0.25 & 0.50 & 0.25 \\ 
+0 & 0 & 0 & 0 & 0.50 & 0.50 
+\end{bmatrix}
+$$
+
+\
+
+The first row in $P$ gives the probabilities of moving to all states 1 through 6 in a single step from location 1, the second row gives the transition probabilities in a single step from location 2, and so on.
+
+\
+
+There are several important properties of this particular Markov chain. It is possible to go from every state to every state in one or more steps – a Markov chain with this property is said to be irreducible. Given that the person is in a particular state, **_if the person can only return to this state at regular intervals, then the Markov chain is said to be periodic_**. **_This example is aperiodic_** since it is not a periodic Markov chain.
+
+\
+
+We can represent one’s current location as a probability row vector of the form
+
+\
+
+$$p = (p_{1}, p_2, p_3, p_4, p_5, p_6),$$
+
+\
+
+where $p_i$ represents the probability that the person is currently in state $i$. If $p_j$ represents the location of the traveler at step $j$, then the location of the traveler at the $j + 1$ step is given by the matrix product
+
+\
+
+$$P^{j+1} = p^{j}P.$$
+
+\
+
+Suppose we can find a probability vector $w$ such that $wP = w$. Then $w$ is said to be the stationary distribution. **_If a Markov chain is irreducible and aperiodic, then it has a unique stationary distribution_**. Moreover, the limiting distribution of this Markov chain, as the number of steps approaches infinity, will be equal to this stationary distribution.
+
+\
+
+We can empirically demonstrate the existence of the stationary distribution of our Markov chain by running a simulation experiment. We start our random walk at a particular state, say location 3, and then simulate many steps of the Markov chain using the transition matrix $P$. The relative frequencies of our traveler in the six locations after many steps will eventually approach the stationary distribution $w$.
+
+\
+\
+
+We start our simulation in R by reading in the transition matrix _P_ and setting up a storage vector _s_ for the locations of our traveler in the random walk.
+
+```{r}
+P=matrix(c(.5,.5,0,0,0,0,.25,.5,.25,0,0,0,0,.25,.5,.25,0,0,0,0,.25,.5,.25,0,0,0,0,.25,.5,.25,0,0,0,0,.5,.5), nrow=6,ncol=6,byrow=TRUE)
+P
+```
+
+```{r}
+s=array(0,c(50000,1))
+```
+
+\
+\
+
+We indicate that the starting location for our traveler is state 3 and perform a loop to simulate 50,000 draws from the Markov chain. We use the sample function to simulate one step – the arguments to this function indicate that we are sampling a single value from the set {1, 2, 3, 4, 5, 6} with probabilities given by the $s^{j−1}$ row of the transition matrix $P$, where $s^{j−1}$ is the current location of our traveler.
+
+```{r}
+s[1]=3
+for (j in 2:50000)
+  s[j]=sample(1:6,size=1,prob=P[s[j-1],])
+```
+
+\
+\
+
+We summarize the frequencies of visits to the six states after 500, 2000, 8000, and 50,000 steps of the chain using of the table() command. We convert the counts to relative frequencies by dividing by the number of steps.
+
+```{r}
+m=c(500,2000,8000,50000)
+for (i in 1:4)
+  print(table(s[1:m[i]])/m[i])
+```
+
+It appears from the output that the relative frequencies of the states are converging to the stationary distribution $w = (0.1, 0.2, 0.2, 0.2, 0.2, 0.1)$. 
+
+\
+\
+
+We can confirm that $w$ is indeed the stationary distribution of this chain by multiplying $w$ by the transition matrix $P$:
+
+```{r}
+w=matrix(c(.1,.2,.2,.2,.2,.1),nrow=1,ncol=6)
+w%*%P
+```
+
+\
+\
+\
+\
+\
+\
+\
+
+## 6.3 Metropolis-Hastings algorithm
+
+\
+
+A popular way of simulating from a general posterior distribution is by using Markov chain Monte Carlo (MCMC) methods. This essentially is a continuous-valued generalization of the discrete Markov chain setup described in the previous section. **_The MCMC sampling strategy sets up an irreducible, aperiodic Markov chain for which the stationary distribution equals the posterior distribution of interest. A general way of constructing a Markov chain is by using a Metropolis-Hastings algorithm_**. In this section, we focus on two particular variants of Metropolis-Hastings algorithms, the independence chain and the random walk chain, that are applicable to a wide variety of Bayesian inference problems.
+
+\
+
+Suppose we wish to simulate from a posterior density $g(\theta|y)$. In the following, to simplify notation, we write the density simply as $g(\theta)$. A Metropolis-Hastings algorithm begins with an initial value $\theta^0$ and specifies a rule for simulating the $t$th value in the sequence $\theta^t$ given the $(t − 1)$st value in the sequence $\theta^{t−1}$. This rule consists of a proposal density, which simulates a candidate value $\theta^*$, and the computation of an acceptance probability $P$, which indicates the probability that the candidate value will be accepted as the next value in the sequence. Specifically, this algorithm can be described as follows:
+
+\
+
+- Simulate a candidate value $\theta^*$ from a proposal density $p(\theta^*|\theta^{t-1})$.
+- Compute the ratio
+
+$$R = \frac{g(\theta^*)p(\theta^{t-1}|\theta^*)}{g(\theta^{t-1})p(\theta^*|\theta^{t-1})}.$$
+
+- Compute the acceptance probability $P = min\left \{ R,1 \right \}$.
+- Sample a value $\theta^t$ such that $\theta^t = \theta^*$ with probability $P$; otherwise $\theta^t = \theta^{t-1}$.
+
+\
+
+Under some easily satisfied regularity conditions on the proposal density $p(\theta^*|\theta^{t-1})$, the sequence of simulated draws $\theta^1,\theta^2, \cdots$ will converge to a random variable that is distributed according to the posterior distribution $g(\theta)$.
+
+\
+
+Different Metropolis-Hastings algorithms are constructed depending on the choice of proposal density. If the proposal density is independent of the current value in the sequence,
+
+\
+
+$$p(\theta^*|\theta^{t-1}) = p(\theta^*),$$
+
+\
+
+then the resulting algorithm is called an **_independence_** chain. Other proposal densities can be defined by letting the density have the form
+
+\
+
+$$R = \frac{g(\theta^*)}{g(\theta^{t-1})}.$$
+
+\
+
+The R functions rwmetrop() and indepmetrop() in the _LearnBayes_ package implement, respectively, the random walk and independence Metropolis-Hastings algorithms for special choices of proposal densities. For the function rwmetrop(), the proposal density has the form
+
+\
+
+$$\theta^* = \theta^{t-1} + \mathrm{scale} \, Z,$$
+
+\
+
+where $Z$ is multivariate normal with mean vector $0$ and variance-covariance matrix $V$ and scale is a positive scale parameter. For the function indepmetrop(), the proposal density for $\theta^*$ is multivariate normal with mean vector $\mu$ and covariance matrix $V$.
+
+\
+
+To use a Metropolis-Hastings algorithm, one first decides on the proposal density and then obtains a simulated sample of draws {$\theta^t,t = 1, \cdots, m$} by using the R functions rwmetrop() or indepmetrop(). The output of each of these functions has two components: _par_ is a matrix of simulated draws where each row corresponds to a value of $\theta$, and _accept_ gives the acceptance rate of the algorithm.
+
+\
+
+Desirable features of the proposal density in an algorithm depend on the MCMC algorithm employed. For an independence chain, we desire that the proposal density $p$ approximate the posterior density $g$, suggesting a high acceptance rate. But, as in rejection sampling, it is important that the ratio $g/p$ be bounded, especially in the tail portion of the posterior density. This means that one may choose a proposal $p$ that is more diffuse than the posterior, resulting in a lower acceptance rate. For random walk chains with normal proposal densities, it has been suggested that acceptance rates between 25% and 45% are good. The “best” choice of acceptance rate ranges from 45% for one and two parameters to 25% for problems with more parameters. This advice also applies when one monitors the Metropolis within Gibbs algorithm described in Section 6.4.
+
+\
+\
+\
+\
+\
+\
+\
+
+## 6.4 Gibbs sampling
+
+\
+
+One of the attractive methods for setting up an MCMC algorithm is **_Gibbs sampling_**. Suppose that the parameter vector of interest is $\theta = (\theta_1, ..., \theta_p)$. The joint posterior distribution of $\theta$, which we denote by [$\theta$|data], may be of high dimension and difficult to summarize. Suppose we define the set of conditional distributions
+
+\
+
+
+\begin{align}
+& \left [ \theta_1 | \theta_2, \cdots, \theta_p, data \right ], \\
+& \left [ \theta_2 | \theta_1, \theta_3, \cdots, \theta_p, data \right ], \\
+
+& \cdots \\
+
+& \left [ \theta_p | \theta_1, \cdots, \theta_{p-1}, data \right ],
+\end{align}
+
+
+\
+
+where [X|Y,Z] represents the distribution of X conditional on values of the random variables Y and Z. The idea behind Gibbs sampling is that we can set up a Markov chain simulation algorithm from the joint posterior distribution by successfully simulating individual parameters from the set of $p$ conditional distributions. Simulating one value of each individual parameter from these distributions in turn is called one cycle of Gibbs sampling. Under general conditions, draws from this simulation algorithm will converge to the target distribution (the joint posterior of $\theta$) of interest.
+
+\
+
+In situations where it is not convenient to sample directly from the conditional distributions, one can use a Metropolis algorithm such as the random walk type to simulate from each distribution. A “Metropolis within Gibbs” algorithm of this type is programmed in the function gibbs() in the _LearnBayes_ package. Suppose that $θ_i^t$ represents the current value of $\theta_i$ in the simulation, and let $g(\theta_i)$ represent the conditional distribution where we have suppressed the dependence of this distribution on values of the remaining components of $\theta$. Then a candidate value for $\theta_i$ is given by
+
+\
+
+$$\theta_i^* = \theta_i^t + c_iZ,$$
+
+\
+
+where $Z$ is a standard normal variate and $c_i$ is a fixed scale parameter. The next simulated value of $\theta_i$, $θ_i^{t+1}$, will be equal to the candidate value with probability $P = min\left \{ 1, g(\theta_i^*)/g(\theta_i^t) \right \}$; otherwise the value $\theta_i^{t+1} = \theta_t$. To use ii ii 
+the function gibbs(), one inputs the function defining the log posterior, the starting value of the simulation, the number of Gibbs cycles, and a vector of scale parameters containing $c_1, \cdots,c_p$. The output of gibbs() is a list; the component _par_ is a matrix of simulated draws and _accept_ is a vector of acceptance rates for the individual Metropolis steps.
+
+\
+\
+\
+\
+\
+\
+\
+
+## 6.5 MCMC output analysis
+
+\
+
+For the MCMC algorithms described in this book, the distribution of the simulated value at the $j$th iterate, $\theta_j$, will converge to a draw from the posterior distribution as $j$ approaches infinity. Unfortunately, this theoretical result provides no practical guidance on how to decide if the simulated sample provides a reasonable approximation to the posterior density $g(\theta|data)$.
+
+\
+
+In typical practice, one monitors the performance of an MCMC algorithm by inspecting the value of the acceptance rate, constructing graphs, and computing diagnostic statistics on the stream of simulated draws. We call this investigation an MCMC output analysis. By means of this exploratory analysis, one decides if the chain has sufficiently explored the entire posterior distribution (there is good mixing) and the sequence of draws has approximately converged. If one has a sample from the posterior distribution, then one wishes to obtain a sufficient number of draws so that one can accurately estimate any particular summary of the posterior of interest.
+
+\
+
+In this section we briefly describe some of the important issues in interpreting MCMC output and describe a few graphical and numerical diagnostics for assessing convergence. One issue in understanding MCMC output is detecting the size of the burn-in period. The simulated values of $\theta$ obtained at the beginning of an MCMC run are not distributed from the posterior distribution. However, after some number of iterations have been performed (the burn-in period), the effect of the initial values wears off and the distribution of the new iterates approaches the true posterior distribution. One way of estimating the length of the burn-in period is to examine trace plots of simulated values of a component or particular function of $\theta$ against the iteration number. Trace plots are especially important when MCMC algorithms are initialized with parameter values that are far from the center of the posterior distribution.
+
+\
+
+A second concern in analyzing output from MCMC algorithms is the degree of autocorrelation in the sampled values. In both the Metropolis and Gibbs sampling algorithms, the simulated value of $\theta$ at the $(j + 1)$st iteration is dependent on the simulated value at the $j$th iteration. If there is strong correlation between successive values in the chain, then two consecutive values provide only marginally more information about the posterior distribution than a single simulated draw. Also, a strong correlation between successive iterates may prevent the algorithm from exploring the entire region of the parameter space. A standard statistic for measuring the degree of dependence between successive draws in the chain is the autocorrelation that measures the correlation between the sets {$\theta^j$} and {$\theta^{j+L}$}, where $L$ is the lag or number of iterates separating the two sets of values. A standard graph is to plot the values of the autocorrelation against the lag $L$. If the chain is mixing adequately, the values of the autocorrelation will decrease to zero as the lag value is increased.
+
+\
+
+Another issue that arises in output analysis is the choice of the simulated sample size and the resulting accuracy of calculated posterior summaries. Since iterates in an MCMC algorithm are not independent, one cannot use standard “independent sample” methods to compute estimated standard errors. One simple method of computing standard errors for correlated output is the method of batch means. Suppose we estimate the posterior mean of $\theta_i$ with the summary sample mean
+
+\
+
+$$\bar{\theta}_i = \frac{\sum_{j=1}^{m}\theta_i^j}{m}$$
+
+\
+
+What is the simulation standard error of this estimate? In the batch means method, the stream of simulated draws {$\theta_i^j$} is subdivided into $b$ batches, each batch of size $v$, where $m = bv$. In each batch, we compute a sample mean; call the set of sample means $\bar{\theta}_i^1, \cdots, \bar{\theta}_i^b$. If the lag one autocorrelation in the sequence in the batch means is small, then we can approximate the standard error of the estimate $\bar{\theta}_i$ by the standard deviation of the batch means divided by the square root of the number of batches.
+
+\
+\
+\
+\
+\
+\
+\
+
+## 6.6 A strategy in Bayesian computing
+
+\
+
+For a particular Bayesian inference problem, we assume that one has defined the log posterior density by an R function. Following the recommendation of Chapter 11 in Gelman et al. (2003), a good approach for summarizing this density is to set up a Markov chain simulation algorithm. The Metropolis-Hastings random walk and independence chains and the Gibbs sampling algorithm are attractive Markov chains since they are easy to program and require relatively little prior input. But these algorithms do require some initial guesses at the location and spread of the parameter vector $\theta$. These initial guesses can be found by non-Bayesian methods such as the method of moments or maximum likelihood. Alternatively, one can obtain an approximation to the posterior distribution by finding the mode using some optimization algorithm. For example, Nelder and Mead’s method gives the posterior mode and an approximation to the variance-covariance matrix that can be used in specifying the proposal densities in the Metropolis-Hastings algorithms.
+
+\
+
+In our examples, we illustrate the use of the function laplace() to locate the posterior density. We can check the accuracy of the normal approximation in the two-parameter case by constructing a contour graph of the joint posterior. These examples show that there can be some errors in the normal approximation. But the laplace() function is still helpful in that the values of $\hat{\theta}$ and $V$ can be used to construct efficient Metropolis-Hastings algorithms for simulating from the exact joint posterior distribution. Once one has decided that the simulated stream of values represents an approximate sample from the posterior, then one can summarize this sample in different ways to perform inferences about $\theta$.
+
+\
+\
+\
+\
+\
+\
+\
+
+## 6.7 Learning about a normal population from grouped data
+
+\
+
+As a first example, suppose a random sample is taken from a normal population with mean $\mu$ and standard deviation $\sigma$. But one only observes the data in “grouped” form, where the frequencies of the data in bins are recorded. For example, suppose one is interested in learning about the mean and standard deviation of the heights (in inches) of men from a local college. One is given the summary frequency data shown in Table 6.1. One sees that 14 men were shorter than 66 inches, 30 men had heights between 66 and 68 inches, and so on.
+
+\
+
+![](/Users/jaeyonglee/Documents/College/RStudio/BCR/image/ss7.png)
+
+\
+
+We are observing multinomial data with unknown bin probabilities $p_1 , ..., p_6$ where the probabilities are functions of the unknown parameters of the normal population. For example, the probability that a student’s height is between 66 and 68 inches is given by $p_2 = \phi(68,\mu,\sigma) − \phi(66,\mu,\sigma)$, where $\phi(;\mu,\sigma)$ is the cdf of a $N(\mu,\sigma)$ random variable. It is straightforward to show that the likelihood of the normal parameters given this grouped data is given by
+
+\
+
+![](/Users/jaeyonglee/Documents/College/RStudio/BCR/image/ss8.png)
+
+\
+
+Suppose $(\mu,\sigma)$ are assigned the usual noninformative prior proportional to $1/\sigma$. Then the posterior density of the parameters is proportional to
+
+\
+
+$$g(\mu, \sigma|data) \propto \frac{1}{\sigma}L(\mu,\sigma).$$
+
+\
+
+Following our general strategy, we transform the positive standard deviation by $\lambda = log(\sigma)$ and the posterior density of $(\mu, \sigma)$ is given by
+
+\
+
+$$g(\mu,\lambda|data) \propto L(\mu, exp(\lambda)).$$
+
+\
+
+We begin by writing a short function groupeddatapost() that computes the logarithm of the posterior density of $(\mu,\lambda)$. There are two arguments to this function: a vector _theta_ corresponding to a value of $(\mu,\lambda)$, and a list _data_. The list has three components: _int.lo_ is a vector of lower boundaries for the bins, _int.hi_ is a vector of bin upper boundaries, and _f_ is a vector of bin frequencies.
+
+```{r}
+groupeddatapost=function(theta,data){
+  dj = function(f, int.lo, int.hi, mu, sigma) 
+    f * log(pnorm(int.hi, mu, sigma) - pnorm(int.lo, mu, sigma))
+  mu = theta[1]
+  sigma = exp(theta[2])
+  sum(dj(data$f, data$int.lo, data$int.hi, mu, sigma))
+}
+```
+
+\
+\
+
+We begin by defining the grouped data by the list _d_.
+
+```{r}
+d=list(int.lo=c(-Inf,seq(66,74,by=2)), int.hi=c(seq(66,74,by=2), Inf), f=c(14,30,49,70,33,15))
+```
+
+\
+\
+
+To use the function laplace(), one requires a good guess at the location of the posterior mode. To estimate the mode of $(\mu,log(\sigma))$, we first create an artificial continuous dataset by replacing each grouped observation by its bin midpoint. Then we approximate the posterior mode by computing the sample mean and the logarithm of the standard deviation of these artificial observations.
+
+```{r}
+y=c(rep(65,14),rep(67,30),rep(69,49),rep(71,70),rep(73,33), rep(75,15))
+mean(y)
+```
+
+```{r}
+log(sd(y))
+```
+
+Based on this computation, we believe that the posterior of the vector $(\mu,log(\sigma))$ is approximately (70, 1). 
+
+\
+\
+
+We use the laplace() function, where the log posterior is defined in the function groupeddatapost(), _start_ is set equal to this starting value, and the grouped data are contained in the list _d_.
+
+```{r}
+library(LearnBayes)  # for laplace()
+start=c(70,1)
+fit=laplace(groupeddatapost,start,d)
+fit
+```
+
+From the output, the posterior mode of $(\mu, log(\sigma))$ is found to be (70.17, 0.97). 
+
+\
+\
+
+The associated posterior standard deviations of the parameters can be estimated by computing the square roots of the diagonal elements of the variance-covariance matrix.
+
+```{r}
+modal.sds=sqrt(diag(fit$var))
+modal.sds
+```
+
+\
+\
+
+We use the output from the function laplace() to design a Metropolis random walk algorithm to simulate from the joint posterior. For the proposal density, we use the variance-covariance matrix obtained from laplace() and we set the scale parameter equal to 2. We run 10,000 iterations of the random walk algorithm starting at the value _start_. The output _fit2_ is a list with two components: _par_ is a matrix of simulated values where each row corresponds to a single draw of the parameter vector, and _accept_ gives the acceptance rate of the random walk chain.
+
+```{r}
+proposal=list(var=fit$var,scale=2)
+fit2=rwmetrop(groupeddatapost,proposal,start,10000,d)
+fit2$accept
+```
+
+We monitor the algorithm by displaying the acceptance rate; here the value is .297, which is close to the desired acceptance rate for this Metropolis random walk algorithm.
+
+\
+\
+
+We can summarize the parameters $\mu$ and $log(\sigma)$ by computing the posterior means and posterior standard deviations.
+
+```{r}
+post.means=apply(fit2$par,2,mean)
+post.sds=apply(fit2$par,2,sd)
+```
+
+\
+\
+
+One can assess the accuracy of the model approximation to the posterior by comparing the means and standard deviations from the function laplace() with the values computed from the simulated output from the MCMC algorithm.
+
+```{r}
+cbind(c(fit$mode),modal.sds)
+```
+
+```{r}
+cbind(post.means,post.sds)
+```
+
+For this model, there is close agreement between the two sets of posterior moments which indicates that the modal approximation to the posterior distribution is reasonably accurate.
+
+\
+\
+
+We confirm this statement by using the function mycontour() to draw a contour plot of the joint posterior of $\mu$ and $log(\sigma)$. Let's plot the last 5000 simulated draws from the random walk Metropolis algorithm. 
+
+```{r}
+library(LearnBayes)
+mycontour(groupeddatapost,c(69,71,.6,1.3),d, xlab="mu",ylab="log sigma", sub="Contour plot of posterior of mu and log sigma for grouped data")
+points(fit2$par[5001:10000,1],fit2$par[5001:10000,2])
+```
+
+Note that the contour lines have an elliptical shape that confirms the accuracy of the normal approximation in this example.
+
+\
+\
+\
+\
+\
+\
+\
+
+## 6.8 Example of output analysis
+
+\
+
+We illustrate the use of MCMC output analysis using the R package _coda_ which will be described in Chapter 11. Suppose we rerun the Metropolis random walk algorithm for the grouped data posterior with poor choices of starting value and proposal density. As a starting value, we choose $(\mu,log(\sigma)) = (65, 1)$ (the choice of $\mu$ is too small) and we select the small scale factor of 0.2 (instead of 2):
+
+```{r}
+start=c(65,1)
+proposal=list(var=fit$var,scale=0.2)
+```
+
+\
+\
+
+We then rerun the Metropolis function rwmetrop():
+
+```{r}
+bayesfit=rwmetrop(groupeddatapost,proposal,start,10000,d)
+bayesfit$accept
+```
+
+We find that the acceptance rate of this modified algorithm is 0.89, which is much larger than the 0.29 rate that we found using the scale factor 2.
+
+\
+\
+
+In this example, the first 2000 iterations are discarded to remove the burn-in period due to the poor starting value. We display trace plots of the simulated draws of $\mu$ and $log(\sigma)$ from this Metropolis algorithm using the xyplot() function in the _coda_ library.
+
+```{r}
+library(coda)
+library(lattice)  # need this for xyplot() as well
+dimnames(bayesfit$par)[[2]]=c("mu","log sigma")
+xyplot(mcmc(bayesfit$par[-c(1:2000),]),col="black")
+```
+
+Note that the simulated draws appear to have reached the main support of the posterior of $\mu$. However the simulated sequence appears irregular; for example, the iterates will explore the region where $mu > 70.5$ for a while before returning to the center of the distribution.
+
+\
+\
+
+One can observe the strong correlation structure of the sequences by using autocorrelation plots produced by the autocorr.plot() function.
+
+```{r}
+par(mfrow=c(2,1))
+autocorr.plot(mcmc(bayesfit$par[-c(1:2000),]),auto.layout=FALSE)
+```
+
+The autocorrelations are close to one for lag one and reduce very slowly as a function of the lag.
+
+\
+\
+\
+\
+\
+\
+\
+
+## 6.9 Modeling data with Cauchy errors
+
+\
+
+For a second example, suppose that we are interested in modeling data where outliers may be presented. Suppose $y_1,...,y_n$ are a random sample from a Cauchy density with location parameter $\mu$ and scale parameter $\sigma$,
+
+\
+
+$$f(y|\mu, \sigma) = \frac{1}{\pi\sigma(1+z^2)},$$
+
+\
+
+where $z = (x-\mu)/\sigma$. Suppose that we assign the usual noninformative prior to $(\mu,\sigma)$:
+
+\
+
+$$g(\mu, \sigma) \propto \frac{1}{\sigma}.$$
+
+\
+
+The posterior density of $\mu$ and $\sigma$ is given, up to a proportionality constant, by
+
+\
+
+\begin{align}
+g(\mu, \sigma|data) & \propto \frac{1}{\sigma}\prod_{i=1}^{n}f(y_i|\mu,\sigma) \\
+& = \frac{1}{\sigma}\prod_{i=1}^{n}\left [ \frac{1}{\sigma}\left ( 1+(y_i-\mu)^2/\sigma^2 \right ) \right ].
+\end{align}
+
+\
+
+Again we first transform the positive parameter $\sigma$ to the real line using the reexpression $\lambda = log(\sigma)$, leading to the posterior density of $(\mu, \lambda)$:
+
+\
+
+$$g(\mu, \lambda|data) \propto \prod_{i=1}^{n}\left [ exp(-\lambda)\left ( 1+exp(-2\lambda)(y_i-\mu)^2 \right )^{-1} \right ].$$
+
+\
+
+The logarithm of the density is then given, up to an additive constant, by
+
+\
+
+$$log \, g(\mu, \lambda|data) = \sum_{i=1}^{n}\left [ -\lambda - log\left ( 1+exp(-2\lambda)(y_i-\mu)^2 \right ) \right ].$$
+
+\
+\
+
+We write the following R function cauchyerrorpost() to compute the logarithm of the posterior density. There are two arguments to the function: _theta_, a vector corresponding to a value of the pair $(\mu, \lambda)$, and the vector of observations $y$. To simplify the code, we use the R function dt(), which computes the density of the $t$ random variable. (The Cauchy density is the $t$ density with a single degree of freedom.)
+
+```{r}
+cauchyerrorpost=function (theta, data){
+  logf = function(data, theta)
+    log(dt((data - theta[1])/exp(theta[2]), df = 1)/exp(theta[2]))
+  return(sum(logf(data, theta)))
+}
+```
+
+\
+\
+
+We apply this model to Darwin’s famous dataset concerning 15 differences of the heights of cross- and self-fertilized plants quoted by Fisher (1960). This dataset can be found in the _LearnBayes_ library with the name _darwin_. We read in the dataset and attach the data frame so we can access the variable difference. We initially compute the mean and logarithm of the standard deviation of the data to get some initial estimates of the locations of the posterior distributions of $\mu$ and $\lambda = log(\sigma)$.
+
+```{r}
+library(LearnBayes)
+data(darwin)
+attach(darwin)
+mean(difference) ;log(sd(difference))
+```
+
+\
+\
+
+To find the posterior mode, we use the function laplace(). The arguments are the name of the function cauchyerrorpost() defining the log posterior density, a vector of initial estimates of the parameters, and the data used in the log posterior function. For initial estimates, we use the values $\mu = 21.6$ and $\lambda = 3.6$ found earlier.
+
+```{r}
+laplace(cauchyerrorpost, c(21.6,3.6), difference)
+```
+
+The posterior mode is given by $(\mu,\lambda) = (24.7,2.77)$. The output also gives the associated variance-covariance matrix and an estimate of the log integral.
+
+\
+\
+
+We can use these estimates of center and spread to construct a rectangle that covers essentially all of the posterior probability of the parameters. As an initial guess at this rectangle, we take for each parameter the posterior mode plus and minus four standard deviations, where the standard deviations are obtainable from the diagonal elements of the variance-covariance matrix.
+
+```{r}
+c(24.7-4*sqrt(34.96),24.7+4*sqrt(34.96)); c(2.77-4*sqrt(.138),2.77+4*sqrt(.138))
+```
+
+\
+\
+
+After some trial and error, we use the rectangle $\mu \in (−10, 60), \lambda \in (1, 4.5)$ as the bounding rectangle for the function mycontour(). 
+
+\
+
+Let's the contour graph of the exact posterior distribution.
+
+```{r}
+mycontour(cauchyerrorpost,c(-10,60,1,4.5),difference, xlab="mu",ylab="log sigma")
+```
+
+The contours of the exact posterior distribution have an interesting shape and one may wonder how these contours compare with those for a bivariate normal approximation. 
+
+\
+\
+
+In the R code, we rerun the laplace() function to obtain the posterior mode _mode_ and associated variance-covariance matrix _var_. Using these values as inputs, we draw contours of a bivariate normal density where the log bivariate normal density is programmed in the function lbinorm(). 
+
+```{r}
+fitlaplace=laplace(cauchyerrorpost,c(21.6,3.6), difference)
+mycontour(lbinorm,c(-10,60,1,4.5),list(m=fitlaplace$mode, v=fitlaplace$var), xlab="mu", ylab="log sigma")
+```
+
+The elliptical shape of these normal contours seems significantly different from the shape of the exact posterior contours, which indicates that the normal approximation may be inadequate.
+
+\
+\
+
+Although the normal approximation may not be the best summary of the posterior distribution, the estimated variance-covariance matrix is helpful in setting up a Metropolis random walk chain. We initially define a list proposal that contains the estimated variance-covariance matrix and a scale factor. We define the starting value of the chain in the array start. The simulation algorithm is run using the function rwmetrop(). The inputs are the function defining the log posterior, the list proposal, the starting value, the number of simulations, and the data vector.
+
+\
+
+Let's display simulated draws from rwmetrop on top of the contour graph.
+
+```{r}
+proposal=list(var=fitlaplace$var,scale=2.5)
+start=c(20,3)
+m=1000
+s=rwmetrop(cauchyerrorpost,proposal,start,m,difference)
+mycontour(cauchyerrorpost,c(-10,60,1,4.5),difference, xlab="mu",ylab="log sigma")
+points(s$par[,1],s$par[,2])
+```
+
+\
+\
+
+It is instructive to illustrate “brute-force” and other Metropolis-Hastings algorithms for this problem. The brute-force algorithm is based on simulating draws of $(\mu, log(\sigma))$ from the grid using the function simcontour(). One can use a Metropolis-Hastings independence chain, where the proposal density is multivariate normal with mean and variance given by the normal approximation. Alternatively, one can apply a Gibbs sampling algorithm with a vector of scale parameters equal to (12, 0.75); these values are approximately equal to twice the estimated posterior standard deviations of the two parameters. All the simulation algorithms were run with a simulation sample size of 50,000. 
+\
+
+The R code for the implementation of the four simulation algorithms follows.
+
+```{r}
+fitgrid=simcontour(cauchyerrorpost,c(-10,60,1,4.5),difference,50000)
+proposal=list(var=fitlaplace$var,scale=2.5)
+start=c(20,3)
+fitrw=rwmetrop(cauchyerrorpost,proposal,start,50000,difference)
+proposal2=list(var=fitlaplace$var,mu=t(fitlaplace$mode))
+fitindep=indepmetrop(cauchyerrorpost,proposal2,start,50000,difference)
+fitgibbs=gibbs(cauchyerrorpost,start,50000,c(12,.75),difference)
+```
+
+\
+\
+
+The simulated draws for a parameter can be summarized by the computation of the 5th, 50th, and 95th percentiles. 
+
+\
+
+For example, one can find the summaries of $\mu$ and $log(\sigma)$ from the random walk simulation by using the command
+
+```{r}
+apply(fitrw$par,2,mean); apply(fitrw$par,2,sd)
+```
+
+\
+\
+\
+\
+\
+\
+\
+
+## 6.10 Analysis of the Stanford Heart Transplant Data
+
+\
+
+Turnbull et al (1974) describe a number of approaches for analyzing heart transplant data from the Stanford Heart Transplanation Program. One of the inferential goals is to decide if heart transplantation extends a patient’s life. One of their models, the Pareto model, assumes individual patients in the nontransplant group have exponential lifetime distributions with mean $1/\theta$, where $\theta$ is assumed to vary between patients and is drawn from a gamma distribution with density
+
+\
+
+$$f(\theta) = \frac{\lambda^p}{\Gamma(p)}\theta^{p-1}exp(-\lambda\theta).$$
+
+\
+
+Patients in the transplant group have a similar exponential lifetime distribution, where the mean is $1/(\theta\tau)$. This model assumes that the patient’s risk of death changes by an unknown constant factor $\tau > 0$. If $\tau = 1$, then there is no increased risk by having a transplant operation.
+
+\
+
+Suppose the survival times {$x_i$} are observed for $N$ nontransplant patients. For $n$ of these patients, $x_i$ represents the actual survival time (in days); the remaining $N−n$ patients were still alive at the end of the study, so $x_i$ represents the censoring time. For the $M$ patients that have a heart transplant, let $y_j$ and $z_j$ denote the time to transplant and survival time; $m$ of these patients died during the study. The unknown parameter vector is $(\tau,\lambda,p)$, with the likelihood function given by
+
+\
+
+![](/Users/jaeyonglee/Documents/College/RStudio/BCR/image/ss9.png)
+
+\
+
+where all the parameters are positive. Suppose we place a uniform prior on $(\tau,\lambda,p)$, so the posterior density is proportional to the likelihood.
+
+\
+
+
+Following our summarization strategy, we transform the parameters by logs:
+
+\
+
+$$\theta_1 = log \, \tau, \ \theta_2 = log \, \lambda, \ \theta_3 = log \, p.$$
+
+\
+
+The posterior density of $\theta = (\theta_1, \theta_2, \theta_3)$ is given by
+
+\
+
+$$g(\theta|data) \propto L(exp(\theta_1),exp(\theta_2),exp(\theta_3))\prod_{i=1}^{3}exp(\theta_i).$$
+
+\
+\
+
+The dataset _stanfordheart_ in the _LearnBayes_ package contains the data for 82 patients; for each patient, there are four variables: survtime, the survival time; transplant, a variable that is 1 or 0 depending on whether the patient had a transplant or not; timetotransplant, the time a transplant patient waits for the operation; and state, a variable that indicates if the survival time was censored (0 if the patient died and 1 if he was still alive). We load this datafile into R.
+
+```{r}
+library(LearnBayes)
+data("stanfordheart")
+```
+
+\
+\
+
+We write a function transplantpost() that computes a value of the log posterior. In the following code, we generally follow the earlier notation. The numbers of nontransplant and transplant patients are denoted by N and M. We divide the data into two groups using the transplant indicator variable $t$. For the nontransplant patients, the survival times and censoring indicators are denoted by xnt and dnt, and for the transplant patients, the waiting times, survival times, and censoring indicators are denoted by y, z, and dt.
+
+```{r}
+ transplantpost=function (theta, data){
+   x = data[, 1]
+   y = data[, 3]
+   t = data[, 2]
+   d = data[, 4]
+   tau = exp(theta[1])
+   lambda = exp(theta[2])
+   p = exp(theta[3])
+   xnt = x[t == 0]
+   dnt = d[t == 0]
+   z = x[t == 1]
+   y = y[t == 1]
+   dt = d[t == 1]
+   logf = function(xnt, dnt, lambda, p)
+     (dnt == 0) * (p * log(lambda) + log(p) - (p + 1) * log(lambda + xnt)) + (dnt == 1) * p * log(lambda/(lambda + xnt))
+   logg = function(z, y, tau, lambda, p)
+     (dt == 0) * (p * log(lambda) + log(p * tau) - (p + 1) * log(lambda + y + tau * z)) + (dt == 1) * p * log(lambda/(lambda + y + tau * z))
+   val = sum(logf(xnt, dnt, lambda, p)) + sum(logg(z, y, tau, lambda, p))
+   val = val + theta[1] + theta[2] + theta[3]
+   return(val)
+}
+```
+
+\
+\
+
+To get an initial idea about the location of the posterior, we run the function laplace(). Our initial estimate of the posterior mode is $\theta = (0, 3, −1)$. The algorithm converges and we obtain the posterior mode and an estimate at the variance-covariance matrix.
+
+```{r}
+start=c(0,3,-1)
+laplacefit=laplace(transplantpost,start,stanfordheart)
+laplacefit
+```
+
+\
+\
+
+We use a Metropolis random walk algorithm (implemented in the function rwmetrop()) to simulate from the posterior. We use a proposal variance of 2V, where V is the estimated variance-covariance matrix from the Laplace fit. We run the simulation for 10,000 iterations.
+
+```{r}
+proposal=list(var=laplacefit$var,scale=2)
+s=rwmetrop(transplantpost,proposal,start,10000,stanfordheart)
+s$accept
+```
+
+The acceptance rate was equal to 19%.
+
+\
+\
+
+One primary inference in this problem is to learn about the three parameters $\tau, \lambda$, and $p$. 
+\
+
+Let's display density estimates of the simulated draws from the marginal posterior densities of each parameter. These are simply obtained by exponentiating the simulated draws of $\theta$ that are output from the function rwmetrop().
+
+```{r}
+tau=exp(s$par[,1])
+plot(density(tau),main="TAU")
+```
+
+\
+\
+
+We can summarize the parameters $\tau, \lambda$, and $p$ by computing the 5th, 50th, and 95th percentiles of the simulated draws using the apply() command.
+
+```{r}
+apply(exp(s$par),2,quantile,c(.05,.5,.95))
+```
+
+we see that the value $\tau = 1$ is in the center of the posterior distribution and so there is insufficient evidence to conclude from these data that $τ \neq 1$. This means that there is insufficient evidence to conclude that the risk of death is higher (or lower) with a transplant operation.
+
+\
+\
+
+In this problem, one is typically interested in estimating a patient’s survival curve. For a nontransplant patient, the survival function is equal to
+
+\
+
+$$S(t) = \frac{\lambda^p}{(\lambda+t)^p}, \ t>0.$$
+
+\
+
+For a given value of the time $t_0$, one can compute a sample from the posterior distribution of $S(t_0)$ by computing the function $\lambda^p/(\lambda+t_0)^p$ from the simulated values from the joint posterior distribution of $lambda$ and $p$. 
+
+\
+\
+
+In the following code, we assume that simulated samples from the marginal posterior distributions of $\lambda$ and $p$ are stored in the vectors _lambda_ and _p_, respectively. Then we (1) set up a grid of values of $t$ and storage vectors _p5, p50_, and _p95_; (2) simulate a sample of values of $S(t)$ for each value of $t$ on the grid; and (3) summarize the posterior sample by computing the 5th, 50th, and 95th percentiles. These percentiles are stored in the variables _p5, p50_, and _p95_. 
+
+\
+
+Then we graph these percentiles as a function of the time variable t. 
+
+```{r}
+p=exp(s$par[,3])
+lambda=exp(s$par[,2])
+t=seq(1,240)
+p5=0*t; p50=0*t; p95=0*t
+for (j in 1:240){
+  S=(lambda/(lambda+t[j]))^p
+  q=quantile(S,c(.05,.5,.95))
+  p5[j]=q[1]; p50[j]=q[2]; p95[j]=q[3]}
+plot(t,p50,type="l",ylim=c(0,1),ylab="Prob(Survival)",xlab="time")
+lines(t,p5,lty=2)
+lines(t,p95,lty=2)
+```
+
+Since there is little evidence that $\tau \neq 1$, this survival curve represents the risk for both transplant and nontransplant patients.
+
+\
+\
+\
+\
+\
+\
+\
+
+## 6.12 Summary of R functions
+
+\
+
+**_cauchyerrorpost()_** – computes the log posterior density of (M, log S) when a sample is taken from a Cauchy density with location M and scale S and a uniform prior distribution is taken on (M, log S)
+
+_Usage_: cauchyerrorpost(theta, data)
+
+_Arguments_: theta, vector of parameter values of (M, log S); data, vector containing sample of observations
+
+_Value_: value of the log posterior
+
+\
+
+**_gibbs()_** – implements a Metropolis within Gibbs algorithm for an arbitrary real-valued posterior density defined by the user
+
+_Usage_: gibbs(logpost,start,m,scale,data)
+
+_Arguments_: logpost, function defining the log posterior density; start, vector giving the starting value of the parameter; m, the number of iterations of the Gibbs sampling algorithm; scale, vector of scale parameters for the random walk Metropolis steps; data, data used in the function logpost
+
+_Value_: par, a matrix of simulated values where each row corresponds to a value of the vector parameter; accept, vector of acceptance rates of the Metropolis steps of the algorithm
+
+\
+
+**_groupeddatapost()_** – computes the log posterior for (M, log S), when sampling from a normal density and the data are recorded in grouped format
+
+_Usage_: groupeddatapost=function(theta,data)
+
+_Arguments_: theta, vector of parameter values of (M, log S); data, list with components int.lo, a vector of left endpoints, int.hi, a vector of right end- points, and f, a vector of bin frequencies
+
+_Value_: value of the log posterior
+
+\
+
+**_indepmetrop()_** – simulates iterates of a Metropolis independence chain for an arbitrary real-valued posterior density defined by the user
+
+_Usage_: indepmetrop(logpost,proposal,start,m,data)
+
+_Arguments_: logpost, function defining the log posterior density; proposal, a list containing mu, an estimated mean, and var, an estimated variance- covariance matrix of the normal proposal density; start, array with a single row that gives the starting value of the parameter vector; m, the number of iterations of the chain data, data used in the function logpost
+
+_Value_: par, a matrix of simulated values where each row corresponds to a value of the vector parameter; accept, the acceptance rate of the algorithm.
+
+\
+
+**_rwmetrop()_** – simulates iterates of a random walk Metropolis chain for an arbi- trary real-valued posterior density defined by the user
+
+_Usage_: rwmetrop(logpost,proposal,start,m,par)
+
+_Arguments_: logpost, function defining the log posterior density; proposal, a list containing var, an estimated variance-covariance matrix, and scale, the Metropolis scale factor; start, vector giving the starting value of the parameter; m, the number of iterations of the chain; par, data used in the function logpost
+
+_Value_: par, a matrix of simulated values where each row corresponds to a value of the vector parameter; accept, the acceptance rate of the algorithm
+
+\
+
+**_transplantpost()_** – computes the log posterior for (log tau, log lambda, log p) for a Pareto model for survival data
+
+_Usage_: transplantpost=function(theta,data)
+
+_Arguments_: theta, vector of parameter values (log tau, log lambda, log p); data, data matrix where columns are survival time, time to transplant, trans- plant indicator, and censoring indicator
+
+_Value_: value of the log posterior
+
+\
+\
+\
+\
+\
+\
+\
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
